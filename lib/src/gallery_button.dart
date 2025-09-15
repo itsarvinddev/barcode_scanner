@@ -97,6 +97,8 @@ class GalleryButton extends StatelessWidget {
             foregroundColor: CupertinoColors.darkBackgroundGray,
           ),
         );
+      default:
+        return const SizedBox.shrink();        
     }
   }
 }
