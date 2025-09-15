@@ -7,7 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 // NEW: Using an enum for button type is safer and more readable than a string.
-enum GalleryButtonType { icon, filled }
+enum GalleryButtonType { none, icon, filled }
 
 /// A button that allows the user to pick an image from the gallery
 /// and analyze it for barcodes.
