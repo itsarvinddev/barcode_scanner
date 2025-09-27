@@ -120,6 +120,18 @@ class AiBarcodeScanner extends StatefulWidget {
   /// Defaults to `false`.
   final bool returnImage;
 
+  /// for custom image picker function.
+  final Future<void> Function(
+    bool Function(BarcodeCapture)? validator,
+    void Function(BarcodeCapture)? onDetect,
+    MobileScannerController controller,
+  )? onCustomImagePicker;
+
+  /// for custom child any where in the body.
+  /// This will override the gallery button for filled.
+  /// use [Align/Positioned] to position the child.
+  final Widget? child;
+
   const AiBarcodeScanner({
     super.key,
     this.fit = BoxFit.cover,
@@ -150,6 +162,8 @@ class AiBarcodeScanner extends StatefulWidget {
     this.flashOnIcon = CupertinoIcons.bolt_fill,
     this.flashOffIcon = CupertinoIcons.bolt,
     this.returnImage = false,
+    this.onCustomImagePicker,
+    this.child,
   });
 
   @override
@@ -174,10 +188,11 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
         DeviceOrientation.portraitDown,
       ]);
     }
-    _controller = widget.controller ?? MobileScannerController(
-      // Passes the returnImage flag to control whether frame images are returned with barcode data
-      returnImage: widget.returnImage,
-    );
+    _controller = widget.controller ??
+        MobileScannerController(
+          // Passes the returnImage flag to control whether frame images are returned with barcode data
+          returnImage: widget.returnImage,
+        );
   }
 
   @override
@@ -244,6 +259,8 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
     final Rect scanWindow = widget.scanWindow ?? defaultScanWindow;
     final isTorchOn = _controller.value.torchState == TorchState.on;
 
+    /// default action icons
+    /// camera switch and torch for easier access
     final actionIcons = [
       IconButton.filled(
         style: IconButton.styleFrom(
@@ -251,7 +268,10 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
           foregroundColor: CupertinoColors.darkBackgroundGray,
         ),
         icon: Icon(widget.cameraSwitchIcon),
-        onPressed: () => _controller.switchCamera(),
+        onPressed: () async {
+          await _controller.switchCamera();
+          setState(() {});
+        },
       ),
       IconButton.filled(
         style: IconButton.styleFrom(
@@ -261,11 +281,11 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
           foregroundColor: CupertinoColors.darkBackgroundGray,
         ),
         icon: Icon(isTorchOn ? widget.flashOnIcon : widget.flashOffIcon),
-        onPressed: () {
-          _controller.toggleTorch();
+        onPressed: () async {
+          await _controller.toggleTorch();
           setState(() {});
         },
-      ),
+      )
     ];
 
     return Scaffold(
@@ -281,6 +301,7 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
                   controller: _controller,
                   isSuccess: _isSuccess,
                   text: widget.galleryButtonText,
+                  onCustomImagePicker: widget.onCustomImagePicker,
                 ),
                 ...actionIcons,
               ],
@@ -341,32 +362,35 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
                   },
               useAppLifecycleState: widget.useAppLifecycleState,
             ),
-            if (widget.galleryButtonType == GalleryButtonType.filled)
-              Align(
-                alignment: widget.galleryButtonAlignment ??
-                    Alignment.lerp(
-                      Alignment.bottomCenter,
-                      Alignment.center,
-                      0.42,
-                    )!,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    GalleryButton(
-                      onImagePick: widget.onImagePick,
-                      onDetect: widget.onDetect,
-                      validator: widget.validator,
-                      controller: _controller,
-                      isSuccess: _isSuccess,
-                      text: widget.galleryButtonText,
-                      icon: widget.galleryIcon,
-                    ),
-                    const SizedBox(width: 4),
-                    ...actionIcons,
-                  ],
-                ),
-              ),
+            widget.child ??
+                (widget.galleryButtonType == GalleryButtonType.filled
+                    ? Align(
+                        alignment: widget.galleryButtonAlignment ??
+                            Alignment.lerp(
+                              Alignment.bottomCenter,
+                              Alignment.center,
+                              0.42,
+                            )!,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            GalleryButton(
+                              onImagePick: widget.onImagePick,
+                              onDetect: widget.onDetect,
+                              validator: widget.validator,
+                              controller: _controller,
+                              isSuccess: _isSuccess,
+                              text: widget.galleryButtonText,
+                              icon: widget.galleryIcon,
+                              onCustomImagePicker: widget.onCustomImagePicker,
+                            ),
+                            const SizedBox(width: 4),
+                            ...actionIcons,
+                          ],
+                        ),
+                      )
+                    : const SizedBox.shrink()),
           ],
         ),
       ),
@@ -379,12 +403,14 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
     _colorResetTimer?.cancel();
     try {
       HapticFeedback.lightImpact(); // Always give feedback on scan
+      final validator = widget.validator;
+      late final bool isValid;
 
-      if (widget.validator == null) return;
-
-      final isValid = widget.validator?.call(capture);
-
-      if (isValid == null) return;
+      if (validator == null) {
+        isValid = true;
+      } else {
+        isValid = validator.call(capture);
+      }
 
       _isSuccess.value = isValid;
 

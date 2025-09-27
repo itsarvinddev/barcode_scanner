@@ -7,7 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 // NEW: Using an enum for button type is safer and more readable than a string.
-enum GalleryButtonType { icon, filled }
+enum GalleryButtonType { none, icon, filled }
 
 /// A button that allows the user to pick an image from the gallery
 /// and analyze it for barcodes.
@@ -21,6 +21,13 @@ class GalleryButton extends StatelessWidget {
   final String text;
   final IconData? icon;
 
+  /// for custom image picker function.
+  final Future<void> Function(
+    bool Function(BarcodeCapture)? validator,
+    void Function(BarcodeCapture)? onDetect,
+    MobileScannerController controller,
+  )? onCustomImagePicker;
+
   const GalleryButton({
     super.key,
     this.onImagePick,
@@ -31,6 +38,7 @@ class GalleryButton extends StatelessWidget {
     this.buttonType = GalleryButtonType.filled,
     this.text = 'Upload from gallery',
     this.icon,
+    this.onCustomImagePicker,
   });
 
   const GalleryButton.icon({
@@ -42,6 +50,7 @@ class GalleryButton extends StatelessWidget {
     required this.isSuccess,
     this.text = 'Upload from gallery',
     this.icon = CupertinoIcons.photo,
+    this.onCustomImagePicker,
   }) : buttonType = GalleryButtonType.icon;
 
   /// REFACTORED: The logic for picking and analyzing the image is now cleaner.
@@ -56,9 +65,12 @@ class GalleryButton extends StatelessWidget {
     final BarcodeCapture? barcodes = await controller.analyzeImage(image.path);
 
     if (barcodes != null) {
-      bool isValid = true;
-      if (validator != null) {
-        isValid = validator!(barcodes);
+      final validator = this.validator;
+      late final bool isValid;
+      if (validator == null) {
+        isValid = true;
+      } else {
+        isValid = validator.call(barcodes);
       }
 
       isSuccess.value = isValid;
@@ -85,11 +97,15 @@ class GalleryButton extends StatelessWidget {
             foregroundColor: CupertinoColors.darkBackgroundGray,
           ),
           icon: Icon(icon),
-          onPressed: _pickAndAnalyzeImage,
+          onPressed: () =>
+              onCustomImagePicker?.call(validator, onDetect, controller) ??
+              _pickAndAnalyzeImage(),
         );
       case GalleryButtonType.filled:
         return FilledButton.icon(
-          onPressed: _pickAndAnalyzeImage,
+          onPressed: () =>
+              onCustomImagePicker?.call(validator, onDetect, controller) ??
+              _pickAndAnalyzeImage(),
           label: Text(text),
           icon: Icon(icon),
           style: FilledButton.styleFrom(
@@ -97,6 +113,8 @@ class GalleryButton extends StatelessWidget {
             foregroundColor: CupertinoColors.darkBackgroundGray,
           ),
         );
+      case GalleryButtonType.none:
+        return const SizedBox.shrink();
     }
   }
 }

@@ -1,3 +1,11 @@
+## 7.1.0
+
+- Added child parameter to AiBarcodeScanner
+- Bump version to 7.1.0 and update dependencies: mobile_scanner to ^7.1.2 and image_picker to ^1.2.0.
+- Introduce a new GalleryButtonType.none option for the gallery button.
+- Add support for custom image picker functionality in AiBarcodeScanner and GalleryButton.
+- Update your iOS deployment target from 12.0 to 13.0 across multiple files.
+
 ## 7.0.0
 
 **Improvements:**

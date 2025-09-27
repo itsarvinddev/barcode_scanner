@@ -160,6 +160,30 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
                   ),
+                  _buildDemoButton(
+                    title: "None Gallery Button",
+                    subtitle: "Shows no gallery button.",
+                    scanner: AiBarcodeScanner(
+                      galleryButtonType: GalleryButtonType.none,
+                      child: Align(
+                        alignment: Alignment.lerp(
+                          Alignment.bottomCenter,
+                          Alignment.center,
+                          0.42,
+                        )!,
+                        child: const Text(
+                          "No gallery button",
+                          style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white),
+                        ),
+                      ),
+                      onDetect: (BarcodeCapture capture) {
+                        /// Do something with the barcode
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),
