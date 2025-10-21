@@ -11,6 +11,9 @@ import 'error_builder.dart';
 import 'gallery_button.dart';
 import 'overlay.dart';
 
+/// The set of quick action controls that can be shown alongside the scanner.
+enum ScannerAction { cameraSwitch, torch, gallery }
+
 /// The main barcode scanner widget.
 class AiBarcodeScanner extends StatefulWidget {
   /// Defines how the camera preview will be fitted into the layout.
@@ -115,6 +118,9 @@ class AiBarcodeScanner extends StatefulWidget {
   /// Custom icon for the flashlight when off
   final IconData flashOffIcon;
 
+  /// Controls which quick action icons (camera switch, torch, gallery) are displayed.
+  final Set<ScannerAction> enabledActionButtons;
+
   /// Whether to return the raw image data (Uint8List) along with the BarcodeCapture.
   /// This can be useful for post-scan image processing such as color analysis or saving the frame.
   /// Defaults to `false`.
@@ -161,6 +167,11 @@ class AiBarcodeScanner extends StatefulWidget {
     this.cameraSwitchIcon = CupertinoIcons.arrow_2_circlepath,
     this.flashOnIcon = CupertinoIcons.bolt_fill,
     this.flashOffIcon = CupertinoIcons.bolt,
+    this.enabledActionButtons = const {
+      ScannerAction.gallery,
+      ScannerAction.cameraSwitch,
+      ScannerAction.torch,
+    },
     this.returnImage = false,
     this.onCustomImagePicker,
     this.child,
@@ -261,32 +272,9 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
 
     /// default action icons
     /// camera switch and torch for easier access
-    final actionIcons = [
-      IconButton.filled(
-        style: IconButton.styleFrom(
-          backgroundColor: CupertinoColors.systemGrey6,
-          foregroundColor: CupertinoColors.darkBackgroundGray,
-        ),
-        icon: Icon(widget.cameraSwitchIcon),
-        onPressed: () async {
-          await _controller.switchCamera();
-          setState(() {});
-        },
-      ),
-      IconButton.filled(
-        style: IconButton.styleFrom(
-          backgroundColor: isTorchOn
-              ? CupertinoColors.activeOrange
-              : CupertinoColors.systemGrey6,
-          foregroundColor: CupertinoColors.darkBackgroundGray,
-        ),
-        icon: Icon(isTorchOn ? widget.flashOnIcon : widget.flashOffIcon),
-        onPressed: () async {
-          await _controller.toggleTorch();
-          setState(() {});
-        },
-      )
-    ];
+    final actionButtons = _buildActionButtons(isTorchOn);
+    final showGalleryAction =
+        widget.enabledActionButtons.contains(ScannerAction.gallery);
 
     return Scaffold(
       appBar: widget.appBarBuilder?.call(context, _controller) ??
@@ -294,16 +282,17 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
             backgroundColor: Colors.transparent,
             actions: [
               if (widget.galleryButtonType == GalleryButtonType.icon) ...[
-                GalleryButton.icon(
-                  onImagePick: widget.onImagePick,
-                  onDetect: widget.onDetect,
-                  validator: widget.validator,
-                  controller: _controller,
-                  isSuccess: _isSuccess,
-                  text: widget.galleryButtonText,
-                  onCustomImagePicker: widget.onCustomImagePicker,
-                ),
-                ...actionIcons,
+                if (showGalleryAction)
+                  GalleryButton.icon(
+                    onImagePick: widget.onImagePick,
+                    onDetect: widget.onDetect,
+                    validator: widget.validator,
+                    controller: _controller,
+                    isSuccess: _isSuccess,
+                    text: widget.galleryButtonText,
+                    onCustomImagePicker: widget.onCustomImagePicker,
+                  ),
+                ...actionButtons,
               ],
               ...?widget.actions,
             ],
@@ -363,7 +352,8 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
               useAppLifecycleState: widget.useAppLifecycleState,
             ),
             widget.child ??
-                (widget.galleryButtonType == GalleryButtonType.filled
+                (widget.galleryButtonType == GalleryButtonType.filled &&
+                        (showGalleryAction || actionButtons.isNotEmpty)
                     ? Align(
                         alignment: widget.galleryButtonAlignment ??
                             Alignment.lerp(
@@ -375,18 +365,20 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            GalleryButton(
-                              onImagePick: widget.onImagePick,
-                              onDetect: widget.onDetect,
-                              validator: widget.validator,
-                              controller: _controller,
-                              isSuccess: _isSuccess,
-                              text: widget.galleryButtonText,
-                              icon: widget.galleryIcon,
-                              onCustomImagePicker: widget.onCustomImagePicker,
-                            ),
-                            const SizedBox(width: 4),
-                            ...actionIcons,
+                            if (showGalleryAction)
+                              GalleryButton(
+                                onImagePick: widget.onImagePick,
+                                onDetect: widget.onDetect,
+                                validator: widget.validator,
+                                controller: _controller,
+                                isSuccess: _isSuccess,
+                                text: widget.galleryButtonText,
+                                icon: widget.galleryIcon,
+                                onCustomImagePicker: widget.onCustomImagePicker,
+                              ),
+                            if (showGalleryAction && actionButtons.isNotEmpty)
+                              const SizedBox(width: 4),
+                            ...actionButtons,
                           ],
                         ),
                       )
@@ -432,5 +424,46 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner> {
         _isSuccess.value = null;
       }
     });
+  }
+
+  List<Widget> _buildActionButtons(bool isTorchOn) {
+    final actions = widget.enabledActionButtons;
+    final icons = <Widget>[];
+
+    if (actions.contains(ScannerAction.cameraSwitch)) {
+      icons.add(
+        IconButton.filled(
+          style: IconButton.styleFrom(
+            backgroundColor: CupertinoColors.systemGrey6,
+            foregroundColor: CupertinoColors.darkBackgroundGray,
+          ),
+          icon: Icon(widget.cameraSwitchIcon),
+          onPressed: () async {
+            await _controller.switchCamera();
+            setState(() {});
+          },
+        ),
+      );
+    }
+
+    if (actions.contains(ScannerAction.torch)) {
+      icons.add(
+        IconButton.filled(
+          style: IconButton.styleFrom(
+            backgroundColor: isTorchOn
+                ? CupertinoColors.activeOrange
+                : CupertinoColors.systemGrey6,
+            foregroundColor: CupertinoColors.darkBackgroundGray,
+          ),
+          icon: Icon(isTorchOn ? widget.flashOnIcon : widget.flashOffIcon),
+          onPressed: () async {
+            await _controller.toggleTorch();
+            setState(() {});
+          },
+        ),
+      );
+    }
+
+    return icons;
   }
 }

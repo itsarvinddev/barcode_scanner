@@ -161,6 +161,20 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   _buildDemoButton(
+                    title: "Enabled Icons Only",
+                    subtitle: "Only show camera switch and torch.",
+                    scanner: AiBarcodeScanner(
+                      galleryButtonType: GalleryButtonType.icon,
+                      enabledActionButtons: const {
+                        ScannerAction.cameraSwitch,
+                        ScannerAction.torch,
+                      },
+                      onDetect: (BarcodeCapture capture) {
+                        /// Do something with the barcode
+                      },
+                    ),
+                  ),
+                  _buildDemoButton(
                     title: "None Gallery Button",
                     subtitle: "Shows no gallery button.",
                     scanner: AiBarcodeScanner(
