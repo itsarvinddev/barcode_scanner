@@ -1,0 +1,45 @@
+# NOTE: when a .pubignore exists, pub uses it *instead of* .gitignore for this
+# directory — so everything the root .gitignore excludes has to be repeated
+# here, or build output ends up in the published archive.
+
+# --- mirrors .gitignore ---
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+*.iml
+*.ipr
+*.iws
+.idea/
+/pubspec.lock
+**/doc/api/
+.dart_tool/
+.packages
+build/
+.vscode
+.vsCode
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# --- publishing only ---
+# Screenshots live in the repo for the README, but only the two declared under
+# `screenshots:` in pubspec.yaml need to ship in the archive.
+assets/IMG_5358.png
+assets/IMG_5360.png
+assets/IMG_5362.png
+assets/IMG_5363.png
+assets/IMG_5364.png
+
+# Machine-specific and generated files from the example app.
+example/android/local.properties
+example/android/.gradle/
+example/ios/Pods/
+example/ios/.symlinks/
+example/macos/Pods/
+example/macos/.symlinks/

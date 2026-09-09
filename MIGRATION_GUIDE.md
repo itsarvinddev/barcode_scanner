@@ -1,161 +1,271 @@
 # Migration Guide
 
-This guide will help you migrate your `ai_barcode_scanner` implementation from the older versions to the new, refactored version. The new version introduces a much cleaner, more robust, and more customizable API.
+## 7.x → 8.0.0
 
-The primary change is the consolidation of numerous individual styling parameters into a single, powerful configuration object: `ScannerOverlayConfig`.
+Version 8 is a rewrite. Almost every fix in it required changing behaviour that
+7.x got wrong, so the breaks are deliberate — but the common path got *shorter*,
+not longer, and most apps need a one-line change or none at all.
 
-## Key Changes
+If you only ever wrote this, nothing changes:
 
-1.  **Overlay Configuration**: Almost all direct overlay parameters (`borderColor`, `borderWidth`, `overlayColor`, `borderRadius`, `borderLength`, etc.) have been removed from the `AiBarcodeScanner` constructor. You now pass a single `ScannerOverlayConfig` object to the `overlayConfig` parameter.
-2.  **Draggable Sheet Removed**: The built-in `DraggableSheet` has been removed in favor of the more flexible `bottomSheetBuilder`. This allows you to use any widget (including `DraggableScrollableSheet`) as a bottom sheet.
-3.  **Gallery Button**: The `hideGalleryButton` and `hideGalleryIcon` parameters have been replaced by a single `galleryButtonType` enum (`GalleryButtonType.filled` or `GalleryButtonType.icon`). To hide the gallery button completely, don't implement the `onImagePick` callback (though this is not a direct feature).
-4.  **Pinch-to-Zoom**: This feature is now enabled by default and does not require a parameter.
-5.  **Transient Feedback Color**: A new parameter `colorTransitionDuration` controls how long the success/error colors are displayed.
+```dart
+AiBarcodeScanner(
+  onDetect: (capture) => handle(capture),
+)
+```
+
+### At a glance
+
+| 7.x | 8.0.0 |
+| --- | --- |
+| `controller: MobileScannerController(...)` | `controller: AiBarcodeScannerController(...)`, or pass the camera options directly to `AiBarcodeScanner` |
+| `galleryButtonText: '…'` | `labels: ScannerLabels(galleryButton: '…')` |
+| `setPortraitOrientation: true` | `preferredOrientations: [DeviceOrientation.portraitUp]` |
+| `onCustomImagePicker: (validator, onDetect, controller) async {…}` | `imagePicker: (context) async => path` |
+| `galleryIcon: CupertinoIcons.photo` (default) | `galleryIcon: Icons.photo_library_outlined` (default) |
+| `child:` replaced the built-in controls | `child:` is drawn *in addition to* them |
+| `ScannerOverlayConfig(backgroundBlurColor: …)` | `ScannerOverlayConfig(backgroundColor: …)` |
+| overlay colours were non-nullable | overlay colours are nullable and fall back to `ScannerTheme` |
+| `overlayBuilder: (context, constraints, controller, isSuccess)` | `overlayBuilder: (context, constraints, controller, scanWindow, isSuccess)` |
+| scan window always restricted detection | `restrictDetectionToScanWindow` (default `false`) |
+| `errorBuilder`'s default widget was `ErrorBuilder` | `ScannerErrorView` |
 
 ---
 
-## Migration Steps
+### 1. The controller is now `AiBarcodeScannerController`
 
-### 1. Update Overlay Parameters
+7.x took a raw `MobileScannerController`. 8.0.0 takes a facade that adds the
+operations a scanner screen actually needs — pausing *detection* without
+stopping the camera, cycling lenses, batch collection — and keeps the raw
+controller reachable at `.raw`.
 
-The biggest change is how you style the overlay.
+**Most of the time you no longer need a controller at all.** Every camera option
+is a parameter on the widget:
 
-**Old Code:**
 ```dart
+// Before
+AiBarcodeScanner(
+  controller: MobileScannerController(
+    formats: [BarcodeFormat.qrCode],
+    detectionSpeed: DetectionSpeed.noDuplicates,
+    torchEnabled: true,
+  ),
+  onDetect: handle,
+)
+
+// After
+AiBarcodeScanner(
+  formats: const [BarcodeFormat.qrCode],
+  detectionSpeed: DetectionSpeed.noDuplicates,
+  torchEnabled: true,
+  onDetect: handle,
+)
+```
+
+When you do want to hold a controller:
+
+```dart
+final controller = AiBarcodeScannerController(
+  formats: const [BarcodeFormat.qrCode],
+);
+
+AiBarcodeScanner(controller: controller, onDetect: handle);
+```
+
+And if you already have a `MobileScannerController` from elsewhere:
+
+```dart
+AiBarcodeScanner(
+  controller: AiBarcodeScannerController.fromMobileScanner(existing),
+  onDetect: handle,
+)
+```
+
+> Passing both a `controller` and camera options such as `formats` now trips an
+> assertion in debug builds, because 7.x silently discarded them.
+
+### 2. Strings moved to `ScannerLabels`
+
+```dart
+// Before
+AiBarcodeScanner(galleryButtonText: 'Choose a photo')
+
+// After
+AiBarcodeScanner(
+  labels: ScannerLabels(galleryButton: 'Choose a photo'),
+)
+```
+
+`ScannerLabels` covers every user-visible string — tooltips, hints, error copy,
+permission copy — and each field has an English default, so partial translations
+are fine.
+
+### 3. Orientation is no longer touched by default
+
+7.x locked portrait by default and, on dispose, called
+`SystemChrome.setPreferredOrientations(DeviceOrientation.values)` — which
+**unlocked every orientation for the whole app**, permanently clobbering a lock
+set in `main()`.
+
+8.0.0 does nothing unless you ask:
+
+```dart
+// Before
+AiBarcodeScanner(setPortraitOrientation: true)
+
+// After
+AiBarcodeScanner(
+  preferredOrientations: const [DeviceOrientation.portraitUp],
+  // Only applied because preferredOrientations was set.
+  restoreOrientationsOnDispose: DeviceOrientation.values,
+)
+```
+
+### 4. The custom image picker got simpler
+
+You now override only *how the file is chosen*; the scanner still runs the
+picked image through the same validation, feedback and overlay pipeline.
+
+```dart
+// Before
+AiBarcodeScanner(
+  onCustomImagePicker: (validator, onDetect, controller) async {
+    final path = await myPicker();
+    final capture = await controller.analyzeImage(path);
+    if (capture != null && (validator?.call(capture) ?? true)) {
+      onDetect?.call(capture);
+    }
+  },
+)
+
+// After
+AiBarcodeScanner(
+  imagePicker: (context) async => myPicker(),
+  onGalleryScanError: (error, stack) => report(error),
+)
+```
+
+### 5. `child` no longer replaces the controls
+
+In 7.x, passing `child` removed the torch and camera-flip buttons. In 8.0.0 it
+is simply stacked over the preview. To remove controls, say so:
+
+```dart
+AiBarcodeScanner(
+  enabledActionButtons: const {},
+  galleryButtonType: GalleryButtonType.none,
+  child: myOverlay,
+)
+```
+
+### 6. `GalleryButtonType.none` hides only the gallery button
+
+This was [#176](https://github.com/itsarvinddev/barcode_scanner/issues/176): in
+7.x it hid the torch and camera-flip buttons too. Gallery visibility and control
+visibility are now independent.
+
+### 7. The scan window is guidance, not a filter, by default
+
+7.x always passed the scan window to the platform. On Android that means a
+barcode must be **entirely** inside the rectangle — and any barcode for which ML
+Kit reports no corner points is dropped outright. That is why
+[#166](https://github.com/itsarvinddev/barcode_scanner/issues/166) could not scan
+a barcode that was plainly visible in the reticle.
+
+8.0.0 draws the reticle but does not restrict detection. Opt back in when you
+need the user to aim at one of several visible codes:
+
+```dart
+AiBarcodeScanner(restrictDetectionToScanWindow: true)
+```
+
+The window itself is now described declaratively and computed from the
+**preview's** box rather than the screen:
+
+```dart
+AiBarcodeScanner(
+  scanWindowConfig: const ScanWindowConfig(
+    shape: ScanWindowShape.wide,   // auto | square | wide | tall | fullPreview
+    maxWidth: 420,                 // keeps the reticle sane on tablets
+    alignment: Alignment(0, -0.1),
+  ),
+)
+```
+
+An explicit `scanWindow: Rect` still works and still overrides the config.
+
+### 8. Overlay colours are nullable, and there is a theme
+
+`ScannerOverlayConfig`'s colour fields are now `Color?`. `null` means "take it
+from the `ScannerTheme`", which is what makes a single top-level theme
+consistent. Setting them works exactly as before.
+
+One rename: `backgroundBlurColor` → `backgroundColor` (it also applies when the
+blur is off).
+
+```dart
+AiBarcodeScanner(
+  theme: ScannerTheme.fromColorScheme(Theme.of(context).colorScheme),
+  overlayConfig: const ScannerOverlayConfig(
+    scannerBorder: ScannerBorder.full,
+    blurSigma: 0, // cheaper on low-end devices
+  ),
+)
+```
+
+### 9. `overlayBuilder` gained the scan window
+
+```dart
+// Before
+overlayBuilder: (context, constraints, controller, isSuccess) => …
+
+// After
+overlayBuilder: (context, constraints, controller, scanWindow, isSuccess) => …
+```
+
+`scanWindow` is the exact rectangle the scanner is using, so a custom overlay
+can never drift out of sync with it.
+
+### 10. Icons default to Material, not Cupertino
+
+7.x defaulted to `CupertinoIcons.*` without depending on `cupertino_icons`, so
+apps that did not declare that package got tofu boxes
+([#188](https://github.com/itsarvinddev/barcode_scanner/issues/188)). The
+defaults are now `Icons.*`, which every app with `uses-material-design: true`
+already bundles. Pass `galleryIcon`, `flashOnIcon` and friends to restore the
+old glyphs — and add `cupertino_icons` to your own `pubspec.yaml` if you do.
+
+### 11. SDK floor
+
+`sdk: >=3.7.0 <4.0.0`, `flutter: >=3.29.0` — set by `mobile_scanner` 7.4.0.
+iOS 15.0 and macOS 12.0 are the minimum deployment targets, set by Flutter 3.29+.
+
+---
+
+## 6.x → 7.x
+
+The 7.x line consolidated the individual overlay styling parameters
+(`borderColor`, `borderWidth`, `overlayColor`, `borderRadius`, `borderLength`,
+`cutOutSize`, …) into a single `ScannerOverlayConfig` passed as `overlayConfig`,
+removed the built-in `DraggableSheet` in favour of `bottomSheetBuilder`, and
+replaced `hideGalleryButton`/`hideGalleryIcon` with the `galleryButtonType`
+enum.
+
+```dart
+// 6.x
 AiBarcodeScanner(
   borderColor: Colors.amber,
   borderWidth: 8,
   borderRadius: 20,
-  borderLength: 40,
-  overlayColor: Colors.black.withOpacity(0.6),
-  cutOutSize: 280,
   successColor: Colors.greenAccent,
-  errorColor: Colors.redAccent,
-  //...
 )
-```
 
-**New Code:**
-
-You now group these properties into a `ScannerOverlayConfig` object.
-
-```dart
-import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
-
+// 7.x and later
 AiBarcodeScanner(
   overlayConfig: const ScannerOverlayConfig(
     borderColor: Colors.amber,
-    // Note: borderWidth is now part of the painter and not directly configurable
-    // from the config. It has a fixed, well-proportioned value.
     borderRadius: 20,
-    cornerLength: 40,
-    backgroundBlurColor: Colors.black54, // Replaces overlayColor
     successColor: Colors.greenAccent,
-    errorColor: Colors.redAccent,
-    
-    // New Options!
-    scannerAnimation: ScannerAnimation.center, // or .fullWidth
-    scannerBorder: ScannerBorder.corner, // or .full
   ),
-  //...
 )
 ```
-
-### 2. Replace `DraggableSheet` with `bottomSheetBuilder`
-
-If you were using `sheetTitle` or `sheetChild`, you now need to provide your own bottom sheet widget via `bottomSheetBuilder`.
-
-**Old Code:**
-```dart
-AiBarcodeScanner(
-  sheetTitle: "My Custom Title",
-  sheetChild: MyCustomWidget(),
-)
-```
-
-**New Code:**
-
-Recreate the draggable sheet (or any other widget) using `bottomSheetBuilder`.
-
-```dart
-AiBarcodeScanner(
-  bottomSheetBuilder: (context, controller) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.1,
-      minChildSize: 0.1,
-      maxChildSize: 0.4,
-      builder: (context, scrollController) {
-        return SingleChildScrollView(
-          controller: scrollController,
-          child: Column(
-            children: [
-              // Your custom drag handler, title, and child here
-              Text("My Custom Title"),
-              const Divider(),
-              MyCustomWidget(),
-            ],
-          ),
-        );
-      },
-    );
-  },
-)
-```
-
-### 3. Update Gallery Button Logic
-
-The boolean flags `hideGalleryButton` and `hideGalleryIcon` are gone. Control the button's appearance with `galleryButtonType`.
-
-**Old Code:**
-```dart
-// To show icon in AppBar
-AiBarcodeScanner(
-  hideGalleryIcon: false,
-  hideGalleryButton: true,
-)
-
-// To show button at bottom
-AiBarcodeScanner(
-  hideGalleryIcon: true,
-  hideGalleryButton: false,
-)
-```
-
-**New Code:**
-```dart
-// To show icon in AppBar
-AiBarcodeScanner(
-  galleryButtonType: GalleryButtonType.icon,
-)
-
-// To show button at bottom (this is the default)
-AiBarcodeScanner(
-  galleryButtonType: GalleryButtonType.filled,
-)
-```
-
-### 4. Parameter Mapping Table
-
-| Old Parameter          | New Parameter / How to achieve                                         | Notes                                                                  |
-| ---------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `borderColor`          | `overlayConfig.borderColor`                                            | Moved into `ScannerOverlayConfig`.                                     |
-| `borderWidth`          | (Removed)                                                              | The border width is now fixed for a cleaner look.                      |
-| `borderRadius`         | `overlayConfig.borderRadius`                                           | Moved into `ScannerOverlayConfig`.                                     |
-| `borderLength`         | `overlayConfig.cornerLength`                                           | Renamed and moved into `ScannerOverlayConfig`.                         |
-| `overlayColor`         | `overlayConfig.backgroundBlurColor`                                    | Moved and renamed for clarity. Now uses a blur effect.                 |
-| `cutOutWidth`          | (Removed)                                                              | The scan window is now responsive by default. Use `scanWindow` for custom size. |
-| `cutOutHeight`         | (Removed)                                                              | The scan window is now responsive by default. Use `scanWindow` for custom size. |
-| `cutOutSize`           | (Removed)                                                              | Use the `scanWindow` parameter with a `Rect` for full control.         |
-| `cutOutBottomOffset`   | (Removed)                                                              | The scan window is now centered by default. Use `scanWindow` for custom positioning. |
-| `showError`            | `overlayConfig.animateOnError`                                         | Moved into `ScannerOverlayConfig`.                                     |
-| `showSuccess`          | `overlayConfig.animateOnSuccess`                                       | Moved into `ScannerOverlayConfig`.                                     |
-| `successColor`         | `overlayConfig.successColor`                                           | Moved into `ScannerOverlayConfig`.                                     |
-| `errorColor`           | `overlayConfig.errorColor`                                             | Moved into `ScannerOverlayConfig`.                                     |
-| `sheetTitle`           | Use `bottomSheetBuilder`                                               | Replaced by a more flexible builder.                                   |
-| `sheetChild`           | Use `bottomSheetBuilder`                                               | Replaced by a more flexible builder.                                   |
-| `hideSheetDragHandler` | Use `bottomSheetBuilder`                                               | Your custom bottom sheet now controls its own UI.                      |
-| `hideSheetTitle`       | Use `bottomSheetBuilder`                                               | Your custom bottom sheet now controls its own UI.                      |
-| `hideGalleryButton`    | Use `galleryButtonType`                                                | Replaced by the `galleryButtonType` enum.                              |
-| `hideGalleryIcon`      | Use `galleryButtonType`                                                | Replaced by the `galleryButtonType` enum.                              |
-
-The rest of the parameters like `onDetect`, `controller`, `validator`, and `onDispose` remain largely the same and should work as before. This refactoring has simplified the API while increasing its power and customizability.
