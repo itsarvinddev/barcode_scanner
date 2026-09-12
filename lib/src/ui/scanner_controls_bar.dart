@@ -45,19 +45,17 @@ class ScannerControlsBar extends StatelessWidget {
       spaced.add(children[i]);
     }
 
-    if (axis == Axis.horizontal) {
-      // Scrollable so an unusually long control set, or a large text scale,
-      // degrades to a scrollable strip instead of overflowing.
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(mainAxisSize: MainAxisSize.min, children: spaced),
-      );
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Column(mainAxisSize: MainAxisSize.min, children: spaced),
+    // Wrap, not a scroll view: an unusually long control set or a large text
+    // scale flows onto a second line instead of overflowing, and — unlike a
+    // Scrollable, which is hit-testable across its whole box — the gaps
+    // between buttons stay transparent so a tap there still reaches
+    // tap-to-focus on the preview underneath.
+    return Wrap(
+      direction: axis,
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      runSpacing: gap,
+      children: spaced,
     );
   }
 }

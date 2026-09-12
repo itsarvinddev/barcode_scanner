@@ -72,6 +72,10 @@ class ScannerPlatformSupport {
 
   /// Whether `Barcode.corners` is populated, which is what the detected-barcode
   /// highlight overlay is drawn from.
+  ///
+  /// True on every supported platform; kept as a capability because the value
+  /// is what gates the highlight overlay, and an unsupported platform reports
+  /// false along with everything else.
   final bool barcodeCorners;
 
   /// Whether the web detection backend can be chosen.
@@ -146,8 +150,8 @@ class ScannerPlatformSupport {
     // `analyzeImage` is not implemented by the web backend.
     analyzeImage: false,
     returnImage: false,
-    // The web backend filters detections to the scan window in Dart, but does
-    // not report barcode geometry, so the highlight overlay has nothing to draw.
+    // Supported since mobile_scanner 7.2.1: the web backend filters detections
+    // to the scan window in Dart, using the corner points below.
     scanWindow: true,
     torch: false,
     zoom: false,
@@ -156,7 +160,9 @@ class ScannerPlatformSupport {
     autoZoom: false,
     invertImage: false,
     cameraResolution: true,
-    barcodeCorners: false,
+    // The zxing-wasm and BarcodeDetector backends both report corner points —
+    // that is what the web scan-window filter is built on.
+    barcodeCorners: true,
     webBarcodeReader: true,
   );
 

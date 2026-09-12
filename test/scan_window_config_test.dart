@@ -112,6 +112,63 @@ void main() {
       expect(rect.top, greaterThanOrEqualTo(100));
     });
 
+    testWidgets('survives a box narrower than minWidth', (tester) async {
+      // `num.clamp` throws an ArgumentError — not a debug-only assert — when
+      // its lower limit exceeds its upper one, which replaced the whole
+      // scanner with an error widget on any small preview.
+      final rect = await resolveWindow(
+        tester,
+        const ScanWindowConfig(),
+        size: const Size(120, 400),
+      );
+      expect(rect.width, lessThanOrEqualTo(120));
+      expect(rect.width, greaterThan(0));
+    });
+
+    testWidgets('survives a box shorter than minHeight', (tester) async {
+      final rect = await resolveWindow(
+        tester,
+        const ScanWindowConfig(),
+        size: const Size(400, 80),
+      );
+      expect(rect.height, lessThanOrEqualTo(80));
+      expect(rect.height, greaterThan(0));
+    });
+
+    testWidgets('survives a safe area that eats most of the box', (
+      tester,
+    ) async {
+      final rect = await resolveWindow(
+        tester,
+        const ScanWindowConfig(padding: EdgeInsets.zero),
+        size: const Size(400, 400),
+        safeArea: const EdgeInsets.symmetric(horizontal: 150),
+      );
+      expect(rect.width, greaterThan(0));
+      expect(rect.left, greaterThanOrEqualTo(150));
+    });
+
+    testWidgets('survives every degenerate size in a sweep', (tester) async {
+      for (final size in const <Size>[
+        Size(1, 1),
+        Size(60, 60),
+        Size(120, 400),
+        Size(187, 600),
+        Size(188, 600),
+        Size(400, 143),
+        Size(400, 144),
+        Size(800, 2),
+      ]) {
+        final rect = await resolveWindow(
+          tester,
+          const ScanWindowConfig(),
+          size: size,
+        );
+        expect(rect.width, greaterThanOrEqualTo(0), reason: '$size');
+        expect(rect.height, greaterThanOrEqualTo(0), reason: '$size');
+      }
+    });
+
     testWidgets('fullPreview covers the whole box', (tester) async {
       final rect = await resolveWindow(
         tester,
@@ -171,6 +228,17 @@ void main() {
       final copy = original.copyWith(shape: ScanWindowShape.wide);
       expect(copy.shape, ScanWindowShape.wide);
       expect(copy.maxWidth, 200);
+    });
+
+    test('copyWith can clear a builder', () {
+      // `builder` wins over every other field in resolve(), so without an
+      // explicit escape hatch a builder-based config could never go back to a
+      // shape.
+      final original = ScanWindowConfig.builder(
+        (context, constraints) => Rect.zero,
+      );
+      expect(original.copyWith(shape: ScanWindowShape.wide).builder, isNotNull);
+      expect(original.copyWith(clearBuilder: true).builder, isNull);
     });
   });
 }

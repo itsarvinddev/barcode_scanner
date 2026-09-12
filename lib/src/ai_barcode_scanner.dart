@@ -137,8 +137,13 @@ class AiBarcodeScanner extends StatefulWidget {
   /// Creates a scanner without a [Scaffold], for embedding in your own page.
   ///
   /// The app bar, bottom sheet and bottom navigation bar builders are not
-  /// available here — the surrounding page owns that chrome. Everything else
-  /// behaves identically.
+  /// available here — the surrounding page owns that chrome.
+  ///
+  /// The defaults are quieter than the full-screen scanner's, on the
+  /// assumption that an embedded preview sits inside a UI you have already
+  /// designed: no controls, no gallery button and no guidance copy. Pass
+  /// [enabledActionButtons], [galleryButtonType] and [showScanHint] to turn
+  /// them back on.
   const AiBarcodeScanner.embedded({
     super.key,
     this.onDetect,
@@ -425,8 +430,12 @@ class AiBarcodeScanner extends StatefulWidget {
 
   /// Builds a custom app bar. Full-screen scanner only.
   ///
-  /// Supplying one replaces the default app bar entirely. The scanner's
-  /// controls stay where they are, so they do not disappear with it.
+  /// Supplying one replaces the default app bar entirely. The torch, camera,
+  /// lens and gallery controls live over the preview, so they are unaffected —
+  /// unlike in 7.x, where a custom app bar removed them.
+  ///
+  /// [ScannerAction.close] is the exception: it renders in the default app
+  /// bar's leading slot, so a custom app bar needs to provide its own way back.
   final PreferredSizeWidget? Function(
     BuildContext context,
     AiBarcodeScannerController controller,
@@ -570,10 +579,13 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
   Timer? _idleHintTimer;
 
   DateTime? _lastAcceptedAt;
+  DateTime? _lastRejectedAt;
   bool _startedReported = false;
   double _pinchBaseZoom = 0;
   TorchState? _lastTorchState;
   double? _lastZoomScale;
+  CameraFacing? _lastFacing;
+  bool _batchFinished = false;
 
   bool get _supported => ScannerPlatformSupport.current.isSupported;
 
@@ -679,6 +691,10 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
       _ownsController = provided == null;
       _controller.state.addListener(_onScannerStateChanged);
       _startedReported = false;
+      _lastTorchState = null;
+      _lastZoomScale = null;
+      _lastFacing = null;
+      _hasMultipleLenses.value = false;
     }
   }
 
@@ -723,7 +739,12 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
 
     switch (state) {
       case AppLifecycleState.resumed:
-        unawaited(_controller.start());
+        // Only the route the user can actually see should reclaim the camera;
+        // otherwise two stacked scanners both call start() and race for the
+        // single platform session.
+        if (ModalRoute.of(context)?.isCurrent ?? true) {
+          unawaited(_controller.start());
+        }
       case AppLifecycleState.inactive:
         unawaited(_controller.stop());
       case AppLifecycleState.detached:
@@ -744,6 +765,11 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
       _startedReported = true;
       widget.onScannerStarted?.call(_controller);
       unawaited(_probeLenses());
+    }
+
+    if (state.cameraDirection != _lastFacing) {
+      _lastFacing = state.cameraDirection;
+      if (_startedReported) unawaited(_probeLenses());
     }
 
     if (state.torchState != _lastTorchState) {
@@ -783,9 +809,13 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
   // Detection pipeline
   // ---------------------------------------------------------------------------
 
-  void _onDetect(BarcodeCapture capture) {
-    if (_controller.isScanningPaused) return;
+  void _onDetect(BarcodeCapture capture, {bool fromGallery = false}) {
+    // A gallery pick is an explicit user action, so it bypasses both the
+    // paused-session guard and the continuous-mode cooldown: the user asked
+    // for this image to be read, now.
+    if (!fromGallery && _controller.isScanningPaused) return;
     if (capture.barcodes.isEmpty) return;
+    if (_controller.collected.isEmpty) _batchFinished = false;
 
     _restartIdleHintTimer();
 
@@ -800,13 +830,21 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
     }
 
     if (!accepted) {
-      _flashResult(success: false);
-      unawaited(widget.feedback.play(ScannerFeedbackEvent.reject));
+      // Without a cooldown, a rejected code held in frame fires the rejection
+      // haptic on every detection callback — a continuous buzz.
+      final lastReject = _lastRejectedAt;
+      final rejectedAt = DateTime.now();
+      if (lastReject == null ||
+          rejectedAt.difference(lastReject) >= widget.scanCooldown) {
+        _lastRejectedAt = rejectedAt;
+        _flashResult(success: false);
+        unawaited(widget.feedback.play(ScannerFeedbackEvent.reject));
+      }
       return;
     }
 
     final now = DateTime.now();
-    if (widget.scanMode == ScanMode.continuous) {
+    if (!fromGallery && widget.scanMode == ScanMode.continuous) {
       final last = _lastAcceptedAt;
       if (last != null && now.difference(last) < widget.scanCooldown) {
         return;
@@ -825,8 +863,12 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
         unawaited(widget.feedback.play(ScannerFeedbackEvent.detect));
         widget.onDetect?.call(capture);
       case ScanMode.batch:
+        final limit = widget.maxScans;
         var collectedAny = false;
         for (final barcode in capture.barcodes) {
+          // Stop at the limit rather than taking the whole capture: a single
+          // frame can carry more barcodes than the budget has room for.
+          if (limit != null && _controller.collected.length >= limit) break;
           if (_controller.collect(barcode)) collectedAny = true;
         }
         if (!collectedAny) return;
@@ -834,7 +876,6 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
         unawaited(widget.feedback.play(ScannerFeedbackEvent.detect));
         widget.onDetect?.call(capture);
 
-        final limit = widget.maxScans;
         if (limit != null && _controller.collected.length >= limit) {
           _finishBatch();
         }
@@ -842,6 +883,10 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
   }
 
   void _finishBatch() {
+    // `onScanComplete` hands over ownership of the collected list; firing it
+    // twice for one session would double-submit whatever the host does with it.
+    if (_batchFinished) return;
+    _batchFinished = true;
     _controller.pauseScanning();
     widget.onScanComplete?.call(_controller.collected);
   }
@@ -870,7 +915,9 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
 
       final capture = await _controller.analyzeImage(
         path,
-        formats: widget.formats,
+        // Read the formats off the live controller, not the widget: when the
+        // caller supplies a controller, `widget.formats` is asserted empty.
+        formats: _controller.raw.formats,
       );
 
       if (!mounted) return;
@@ -881,7 +928,7 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
         return;
       }
 
-      _onDetect(capture);
+      _onDetect(capture, fromGallery: true);
     } catch (error, stackTrace) {
       if (!mounted) return;
       _flashResult(success: false);
@@ -1070,6 +1117,10 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
                 : null;
 
         final preview = MobileScanner(
+          // `_MobileScannerState.controller` is `late final` — it is captured
+          // once in initState and never revisited — so swapping the controller
+          // has to remount the subtree, or upstream keeps driving the old one.
+          key: ValueKey<MobileScannerController>(_controller.raw),
           controller: _controller.raw,
           fit: widget.fit,
           scanWindow: effectiveScanWindow,
@@ -1387,43 +1438,32 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
             return Stack(
               fit: StackFit.expand,
               children: <Widget>[
-                // The bottom cluster starts below the scan window where there
-                // is room, and falls back to the bottom of the preview when
-                // the window reaches too far down.
+                // Anchored to the bottom and sized to its own content, with no
+                // `top`. Constraining the top to the scan window's bottom edge
+                // instead would collapse the cluster to zero height — and make
+                // every control untappable — whenever the window reaches the
+                // bottom of the preview: a short landscape screen, or
+                // ScanWindowShape.fullPreview.
                 Positioned(
-                  left: 0,
-                  right: 0,
+                  left: isWide && zoomSlider != null ? 56 : 0,
+                  right: isWide ? theme.controlSize! + 32 : 0,
                   bottom: 0,
-                  top: (scanWindow.bottom + 16).clamp(
-                    0.0,
-                    constraints.maxHeight,
-                  ),
                   child: SafeArea(
                     top: false,
                     child: Padding(
-                      padding: EdgeInsets.only(
-                        left: 16,
-                        right: isWide ? 16 + (theme.controlSize! + 32) : 16,
-                        bottom: 16,
-                      ),
-                      child: OverflowBox(
-                        alignment: Alignment.bottomCenter,
-                        maxHeight: double.infinity,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            for (
-                              var i = 0;
-                              i < bottomCluster.length;
-                              i++
-                            ) ...<Widget>[
-                              if (i > 0)
-                                SizedBox(height: theme.controlSpacing!),
-                              bottomCluster[i],
-                            ],
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          for (
+                            var i = 0;
+                            i < bottomCluster.length;
+                            i++
+                          ) ...<Widget>[
+                            if (i > 0) SizedBox(height: theme.controlSpacing!),
+                            bottomCluster[i],
                           ],
-                        ),
+                        ],
                       ),
                     ),
                   ),

@@ -411,6 +411,99 @@ void main() {
     });
   });
 
+  group('batch limits', () {
+    testWidgets('never collects past maxScans, even from one capture', (
+      tester,
+    ) async {
+      List<Barcode>? completed;
+
+      await pumpScanner(
+        tester,
+        AiBarcodeScanner(
+          overlayConfig: _staticOverlay,
+          feedback: const ScannerFeedbackConfig.silent(),
+          scanMode: ScanMode.batch,
+          maxScans: 2,
+          onScanComplete: (barcodes) => completed = barcodes,
+        ),
+      );
+
+      // One frame carrying more barcodes than the budget has room for.
+      platform.emitBarcode(
+        const BarcodeCapture(
+          barcodes: <Barcode>[
+            Barcode(rawValue: 'a'),
+            Barcode(rawValue: 'b'),
+            Barcode(rawValue: 'c'),
+            Barcode(rawValue: 'd'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(completed, hasLength(2));
+      expect(completed!.map((b) => b.rawValue), <String>['a', 'b']);
+    });
+
+    testWidgets('onScanComplete fires exactly once per session', (
+      tester,
+    ) async {
+      var completions = 0;
+
+      await pumpScanner(
+        tester,
+        AiBarcodeScanner(
+          overlayConfig: _staticOverlay,
+          feedback: const ScannerFeedbackConfig.silent(),
+          scanMode: ScanMode.batch,
+          maxScans: 1,
+          onScanComplete: (_) => completions++,
+        ),
+      );
+
+      for (final value in <String>['a', 'b', 'c']) {
+        platform.emitBarcode(
+          BarcodeCapture(barcodes: <Barcode>[Barcode(rawValue: value)]),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      expect(completions, 1);
+    });
+  });
+
+  group('rejection feedback', () {
+    testWidgets('a rejected code held in frame does not buzz repeatedly', (
+      tester,
+    ) async {
+      final events = <ScannerFeedbackEvent>[];
+
+      await pumpScanner(
+        tester,
+        AiBarcodeScanner(
+          overlayConfig: _staticOverlay,
+          feedback: ScannerFeedbackConfig.silent(onFeedback: events.add),
+          scanCooldown: const Duration(hours: 1),
+          validator: (_) => false,
+          onDetect: (_) {},
+        ),
+      );
+
+      for (var i = 0; i < 5; i++) {
+        platform.emitBarcode(
+          const BarcodeCapture(barcodes: <Barcode>[Barcode(rawValue: 'no')]),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      expect(
+        events.where((e) => e == ScannerFeedbackEvent.reject).length,
+        1,
+        reason: 'the rejection haptic is throttled by scanCooldown',
+      );
+    });
+  });
+
   group('scan window', () {
     testWidgets('does not restrict detection by default', (tester) async {
       // The reticle is guidance. Android rejects any barcode that is not
@@ -462,6 +555,83 @@ void main() {
     });
   });
 
+  group('small and awkward layouts', () {
+    testWidgets('renders in a box smaller than the reticle minimum', (
+      tester,
+    ) async {
+      // ScanWindowConfig.resolve used to throw ArgumentError from num.clamp
+      // here, replacing the whole scanner with an error widget.
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 320,
+              height: 120,
+              child: AiBarcodeScanner.embedded(overlayConfig: _staticOverlay),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(MobileScanner), findsOneWidget);
+    });
+
+    testWidgets(
+      'keeps its controls tappable when the window fills the preview',
+      (tester) async {
+        // The bottom cluster used to be a Positioned whose top was pinned to
+        // scanWindow.bottom, so a full-preview window collapsed it to zero
+        // height and every control became untappable.
+        await pumpScanner(
+          tester,
+          const AiBarcodeScanner(
+            overlayConfig: _staticOverlay,
+            scanWindowConfig: ScanWindowConfig.fullPreview(),
+          ),
+        );
+
+        await tester.tap(find.byIcon(Icons.flashlight_off_outlined));
+        await tester.pumpAndSettle();
+
+        expect(platform.toggleTorchCount, 1);
+      },
+    );
+
+    testWidgets('keeps its controls tappable on a short landscape preview', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(900, 380));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await pumpScanner(
+        tester,
+        const AiBarcodeScanner(overlayConfig: _staticOverlay),
+      );
+
+      await tester.tap(find.byIcon(Icons.flashlight_off_outlined));
+      await tester.pumpAndSettle();
+
+      expect(platform.toggleTorchCount, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('does not overflow at a 2x text scale', (tester) async {
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+          child: const MaterialApp(
+            home: AiBarcodeScanner(overlayConfig: _staticOverlay),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   group('lifecycle and ownership', () {
     testWidgets('a supplied controller survives the scanner', (tester) async {
       final controller = AiBarcodeScannerController();
@@ -476,6 +646,57 @@ void main() {
       // Still usable: disposing it here must not throw.
       expect(controller.isScanningPaused, isFalse);
       controller.dispose();
+    });
+
+    testWidgets('swapping the controller rewires the preview', (tester) async {
+      // `_MobileScannerState.controller` is `late final`, so without a key
+      // change the preview keeps driving the controller that was just
+      // disposed.
+      final first = AiBarcodeScannerController();
+      final second = AiBarcodeScannerController();
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+
+      await pumpScanner(
+        tester,
+        AiBarcodeScanner(controller: first, overlayConfig: _staticOverlay),
+      );
+      final startsAfterFirst = platform.startCalls.length;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AiBarcodeScanner(
+            controller: second,
+            overlayConfig: _staticOverlay,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        platform.startCalls.length,
+        greaterThan(startsAfterFirst),
+        reason: 'the new controller started its own camera session',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a gallery scan uses the supplied controller\'s formats', (
+      tester,
+    ) async {
+      final controller = AiBarcodeScannerController(
+        formats: const <BarcodeFormat>[BarcodeFormat.qrCode],
+      );
+      addTearDown(controller.dispose);
+
+      await pumpScanner(
+        tester,
+        AiBarcodeScanner(controller: controller, overlayConfig: _staticOverlay),
+      );
+
+      // `widget.formats` is asserted empty when a controller is supplied, so
+      // reading formats off the widget would analyse with none at all.
+      expect(controller.raw.formats, <BarcodeFormat>[BarcodeFormat.qrCode]);
     });
 
     testWidgets('the orientation policy is left alone by default', (

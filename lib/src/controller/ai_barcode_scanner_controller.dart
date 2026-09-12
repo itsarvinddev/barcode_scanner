@@ -43,6 +43,13 @@ import '../utils/platform_support.dart';
 /// when it unmounts, as long as that controller has `autoStart` set. It does
 /// not *dispose* it — the instance stays valid — but the camera session is
 /// released, so call [start] again when you mount the next scanner.
+///
+/// The same applies to two scanners mounted at once, for example one route
+/// pushed over another. The platform has a single camera session, so the
+/// second scanner takes it and the first goes dark; when the second is popped,
+/// call [start] on the first to reclaim it. The scanner does not do this for
+/// you, because it cannot tell a session it lost from one you stopped on
+/// purpose.
 class AiBarcodeScannerController extends ChangeNotifier {
   /// Creates a controller that owns a new [MobileScannerController].
   ///
@@ -339,8 +346,12 @@ class AiBarcodeScannerController extends ChangeNotifier {
   ///
   /// Returns `null` when nothing was found. Throws
   /// [MobileScannerBarcodeException] if the platform reported a decoding
-  /// error, and [UnsupportedError] where image analysis is unavailable — which
-  /// is the case on the web and on the iOS Simulator.
+  /// error, and [UnsupportedError] on platforms without image analysis — which
+  /// is the web.
+  ///
+  /// The iOS Simulator also cannot analyse images, but that is indistinguishable
+  /// from a device at runtime, so it surfaces as a platform error rather than
+  /// an [UnsupportedError].
   Future<BarcodeCapture?> analyzeImage(
     String path, {
     List<BarcodeFormat> formats = const <BarcodeFormat>[],

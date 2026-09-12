@@ -194,6 +194,32 @@ void main() {
       expect(validator(capture('12a4')), isFalse);
     });
 
+    test('matches backtracks across alternations', () {
+      // `matchAsPrefix` takes the first alternative that fits and never
+      // backtracks, so hand-anchoring rejects 'ab' here even though the
+      // pattern matches it.
+      final validator = ScanValidators.matches(RegExp('a|ab'));
+
+      expect(validator(capture('a')), isTrue);
+      expect(validator(capture('ab')), isTrue);
+      expect(validator(capture('abc')), isFalse);
+    });
+
+    test('matches respects the pattern flags', () {
+      final validator = ScanValidators.matches(
+        RegExp('abc', caseSensitive: false),
+      );
+
+      expect(validator(capture('ABC')), isTrue);
+      expect(validator(capture('abcd')), isFalse);
+    });
+
+    test('matches does not let a newline sneak past the anchor', () {
+      final validator = ScanValidators.matches(RegExp(r'\d{4}'));
+
+      expect(validator(capture('1234\nevil')), isFalse);
+    });
+
     test('url can be restricted to a host allowlist', () {
       final validator = ScanValidators.url(
         allowedHosts: <String>{'example.com'},

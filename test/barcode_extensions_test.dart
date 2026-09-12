@@ -92,6 +92,36 @@ void main() {
       expect(barcode.actionUri.toString(), 'mailto:a@b.com');
     });
 
+    test('percent-encodes spaces rather than form-encoding them', () {
+      // `Uri(queryParameters:)` would produce 'Hello+there', which mail and
+      // SMS clients render literally.
+      const barcode = Barcode(
+        type: BarcodeType.email,
+        email: Email(address: 'a@b.com', subject: 'Hello there'),
+      );
+      final uri = barcode.actionUri!;
+      expect(uri.query, contains('Hello%20there'));
+      expect(uri.query, isNot(contains('+')));
+    });
+
+    test('rejects a scheme-less URL payload', () {
+      // `Uri.tryParse('example.com')` succeeds but yields a relative reference
+      // that no launcher can open, so the result sheet must not offer 'Open'.
+      const barcode = Barcode(
+        type: BarcodeType.url,
+        url: UrlBookmark(url: 'example.com'),
+      );
+      expect(barcode.actionUri, isNull);
+    });
+
+    test('accepts a URL payload with a scheme', () {
+      const barcode = Barcode(
+        type: BarcodeType.url,
+        url: UrlBookmark(url: 'https://example.com/a'),
+      );
+      expect(barcode.actionUri?.host, 'example.com');
+    });
+
     test('builds a tel URI', () {
       const barcode = Barcode(
         type: BarcodeType.phone,

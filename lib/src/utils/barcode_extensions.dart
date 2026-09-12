@@ -43,6 +43,20 @@ class BarcodeField {
   String toString() => 'BarcodeField($key: $value)';
 }
 
+/// Builds a query string with percent encoding rather than form encoding.
+///
+/// `Uri(queryParameters: …)` applies `application/x-www-form-urlencoded`, which
+/// turns a space into `+`. Mail and SMS clients render that literally.
+String _percentEncodedQuery(Map<String, String> parameters) {
+  return parameters.entries
+      .map(
+        (e) =>
+            '${Uri.encodeQueryComponent(e.key)}='
+            '${Uri.encodeComponent(e.value)}',
+      )
+      .join('&');
+}
+
 /// Presentation helpers for a scanned [Barcode].
 ///
 /// `mobile_scanner` hands back a rich, strongly typed payload (Wi-Fi networks,
@@ -139,7 +153,11 @@ extension AiBarcodeX on Barcode {
     switch (type) {
       case BarcodeType.url:
         final raw = url?.url ?? bestValue;
-        return Uri.tryParse(raw);
+        final parsed = Uri.tryParse(raw);
+        // `Uri.tryParse('example.com')` succeeds but yields a scheme-less
+        // relative reference that no launcher can open.
+        if (parsed == null || !parsed.hasScheme) return null;
+        return parsed;
       case BarcodeType.email:
         final address = email?.address;
         if (address == null || address.isEmpty) return null;
@@ -151,7 +169,9 @@ extension AiBarcodeX on Barcode {
         return Uri(
           scheme: 'mailto',
           path: address,
-          queryParameters: query.isEmpty ? null : query,
+          // Not `queryParameters`: that applies form encoding, so a space
+          // arrives at the mail client as a literal '+'.
+          query: query.isEmpty ? null : _percentEncodedQuery(query),
         );
       case BarcodeType.phone:
         final number = phone?.number;
@@ -164,10 +184,10 @@ extension AiBarcodeX on Barcode {
         return Uri(
           scheme: 'sms',
           path: number,
-          queryParameters:
+          query:
               body == null || body.isEmpty
                   ? null
-                  : <String, String>{'body': body},
+                  : _percentEncodedQuery(<String, String>{'body': body}),
         );
       case BarcodeType.geo:
         final point = geoPoint;

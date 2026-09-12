@@ -41,8 +41,12 @@ class ScannerOverlay extends StatefulWidget {
   State<ScannerOverlay> createState() => _ScannerOverlayState();
 }
 
+// TickerProvider, not SingleTickerProvider: `SingleTickerProviderStateMixin`
+// asserts that only one ticker is ever created and does not release that claim
+// when the ticker is disposed, so rebuilding the controller after an
+// animation-config change would throw in debug.
 class _ScannerOverlayState extends State<ScannerOverlay>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   AnimationController? _controller;
   late Animation<double> _animation;
 

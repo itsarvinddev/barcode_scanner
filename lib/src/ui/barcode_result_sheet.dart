@@ -133,12 +133,21 @@ class BarcodeResultSheet extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             if (fields.isEmpty)
-              SelectableText(
-                value,
-                style: TextStyle(
-                  color: palette.onSurfaceColor,
-                  fontSize: 15,
-                  height: 1.4,
+              // A long plain-text payload would otherwise push the action row
+              // off the bottom of the screen.
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * 0.45,
+                ),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    value,
+                    style: TextStyle(
+                      color: palette.onSurfaceColor,
+                      fontSize: 15,
+                      height: 1.4,
+                    ),
+                  ),
                 ),
               )
             else

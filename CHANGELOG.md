@@ -67,6 +67,61 @@ themeable and localisable. See the
 - Controls are no longer swallowed by the preview's gesture recogniser — with
   tap-to-focus on (the default), tapping the torch previously did nothing.
 
+### Fixed after internal review
+
+A multi-agent adversarial review of the rewrite, before release, turned up a
+further set of defects; all are fixed and pinned by tests.
+
+- **The scanner crashed in any preview smaller than about 188x144 logical
+  pixels.** `ScanWindowConfig.resolve` passed an unclamped `minWidth` as the
+  lower limit of a `num.clamp` whose upper limit was the available width.
+  `clamp` throws `ArgumentError` — not a debug-only assert — when the lower
+  limit is the larger, so the whole scanner was replaced by an error widget.
+  Triggered by an embedded scanner in a card or list tile, a desktop or web
+  window narrowed past that threshold, Android split-screen, or a large
+  horizontal safe area.
+- **Swapping `controller` left the preview driving the disposed one.**
+  `MobileScanner` captures its controller in a `late final` field, so it never
+  saw the new one. The preview now remounts on a controller swap.
+- **Every control became untappable when the scan window reached the bottom of
+  the preview** — a short landscape screen, or `ScanWindowShape.fullPreview`.
+  The control cluster was pinned below the window, so it collapsed to zero
+  height. It is now anchored to the bottom and sized to its own content.
+- **The overlay threw when its animation configuration changed.**
+  `SingleTickerProviderStateMixin` does not release its claim when a ticker is
+  disposed, so rebuilding the controller asserted.
+- **Batch mode overshot `maxScans`** when one capture carried more barcodes
+  than the remaining budget, and `onScanComplete` could fire more than once
+  per session.
+- **`ScanValidators.matches` rejected values its pattern did match.**
+  `matchAsPrefix` takes the first alternative that fits and never backtracks,
+  so `RegExp('a|ab')` rejected `ab`. The pattern is now properly anchored, and
+  its flags are preserved.
+- **A gallery pick was silently discarded** when the session was paused or
+  inside the continuous-mode cooldown, and it analysed with the wrong barcode
+  formats when the caller supplied a controller.
+- **A rejected barcode held in frame fired the rejection haptic on every
+  detection callback** — a continuous buzz. Rejections are now throttled by
+  `scanCooldown`.
+- **`mailto:` and `sms:` URIs were form-encoded**, so a space reached the mail
+  or SMS client as a literal `+`.
+- **`actionUri` returned an unopenable relative URI** for a URL payload with
+  no scheme, so the result sheet offered an "Open" action that could not work.
+- **Two stacked scanner routes both reclaimed the camera on resume.** Only the
+  visible route does now.
+- The lens control went stale after a camera flip; it re-probes when the
+  camera direction changes.
+- A long plain-text payload pushed the result sheet's action buttons off
+  screen.
+- The control strip no longer swallows tap-to-focus in the gaps between
+  buttons, and wraps instead of overflowing at large text scales.
+- `ScanWindowConfig.copyWith` could not clear a `builder`, so a builder-based
+  config could never go back to a shape. Added `clearBuilder`.
+- Corrected the capability matrix: the web backend **does** report barcode
+  corners (that is what its scan-window filter is built on), so
+  `showBarcodeHighlights` works there. Also corrected doc comments on
+  `AiBarcodeScanner.embedded`, `appBarBuilder` and `analyzeImage`.
+
 ### Added
 
 - **`AiBarcodeScannerController`** — a facade over the camera and the scan
@@ -123,9 +178,11 @@ themeable and localisable. See the
   preview and a trailing column on a landscape or desktop one.
 - `onScannerStarted`, `onError`, `onOpenSettings`, `onZoomChanged`,
   `onTorchChanged`, `onClose`, `onGalleryScanError` callbacks.
-- A test suite (82 tests) covering the control-visibility regression, the
-  detection pipeline, the scan-window coordinate space, capability gating,
-  lifecycle and ownership.
+- A test suite (102 tests) covering the control-visibility regression, the
+  detection pipeline, batch limits, rejection throttling, the scan-window
+  coordinate space and its degenerate cases, small and landscape layouts,
+  large text scales, capability gating, controller swapping, lifecycle and
+  ownership.
 
 ### Changed
 

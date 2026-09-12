@@ -203,13 +203,22 @@ class ScanWindowConfig {
       if (heightFactor == null) height = width / targetAspect;
     }
 
+    // Both bounds must be narrowed to what is actually available before they
+    // are used: `num.clamp` throws an ArgumentError — not a debug-only assert —
+    // when its lower limit exceeds its upper one, which would replace the whole
+    // scanner with an error widget on any preview smaller than minWidth x
+    // minHeight (an embedded scanner in a small card, a narrow desktop window,
+    // split-screen).
+    final effectiveMinWidth = minWidth.clamp(0.0, availableWidth);
+    final effectiveMinHeight = minHeight.clamp(0.0, availableHeight);
+
     width = width.clamp(
-      minWidth.clamp(0.0, availableWidth),
-      maxWidth.clamp(minWidth, availableWidth),
+      effectiveMinWidth,
+      maxWidth.clamp(effectiveMinWidth, availableWidth),
     );
     height = height.clamp(
-      minHeight.clamp(0.0, availableHeight),
-      maxHeight.clamp(minHeight, availableHeight),
+      effectiveMinHeight,
+      maxHeight.clamp(effectiveMinHeight, availableHeight),
     );
 
     // Place the window inside the padded area using [alignment].
@@ -222,6 +231,9 @@ class ScanWindowConfig {
   }
 
   /// Returns a copy of this configuration with the given fields replaced.
+  ///
+  /// Pass `clearBuilder: true` to drop a [builder] — passing `builder: null`
+  /// cannot express that, since null means "leave it alone".
   ScanWindowConfig copyWith({
     ScanWindowShape? shape,
     double? widthFactor,
@@ -234,6 +246,7 @@ class ScanWindowConfig {
     Alignment? alignment,
     EdgeInsets? padding,
     Rect Function(BuildContext context, BoxConstraints constraints)? builder,
+    bool clearBuilder = false,
   }) {
     return ScanWindowConfig(
       shape: shape ?? this.shape,
@@ -246,7 +259,9 @@ class ScanWindowConfig {
       maxHeight: maxHeight ?? this.maxHeight,
       alignment: alignment ?? this.alignment,
       padding: padding ?? this.padding,
-      builder: builder ?? this.builder,
+      // `builder` wins over every other field in `resolve`, so there has to be
+      // a way to take it back off.
+      builder: clearBuilder ? null : (builder ?? this.builder),
     );
   }
 }

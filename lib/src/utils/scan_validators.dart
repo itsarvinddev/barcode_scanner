@@ -75,12 +75,23 @@ abstract final class ScanValidators {
   }
 
   /// Accepts captures whose value matches [pattern] in full.
+  ///
+  /// The pattern is anchored for you, so `RegExp(r'\d{4}')` accepts `1234` and
+  /// rejects `12345`. Anchoring by hand — `matchAsPrefix` plus a length check —
+  /// silently rejects alternations that do match, because `matchAsPrefix` takes
+  /// the first alternative that fits and never backtracks: against `ab`,
+  /// `RegExp('a|ab')` matches only `a`.
   static bool Function(BarcodeCapture) matches(RegExp pattern) {
+    final anchored = RegExp(
+      '^(?:${pattern.pattern})\$',
+      caseSensitive: pattern.isCaseSensitive,
+      dotAll: pattern.isDotAll,
+      unicode: pattern.isUnicode,
+    );
     return (capture) {
       final value = _valueOf(capture);
       if (value == null) return false;
-      final match = pattern.matchAsPrefix(value);
-      return match != null && match.end == value.length;
+      return anchored.hasMatch(value);
     };
   }
 
