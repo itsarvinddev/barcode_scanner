@@ -37,6 +37,10 @@ assets/IMG_5363.png
 assets/IMG_5364.png
 
 # Machine-specific and generated files from the example app.
+# The example's lockfile records whatever SDK resolved it, which would
+# contradict the floor declared in pubspec.yaml for anyone reading the
+# published example. `mobile_scanner` omits its example lockfile too.
+example/pubspec.lock
 example/android/local.properties
 example/android/.gradle/
 example/ios/Pods/

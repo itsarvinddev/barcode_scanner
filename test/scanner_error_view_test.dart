@@ -91,6 +91,37 @@ void main() {
     expect(find.text(labels.retryButton), findsOneWidget);
   });
 
+  testWidgets('a whitespace-padded platform detail is shown trimmed', (
+    tester,
+  ) async {
+    // The emptiness test trims, so the displayed value must too, or a padded
+    // platform message renders with stray leading/trailing space.
+    await pumpError(
+      tester,
+      const MobileScannerException(
+        errorCode: MobileScannerErrorCode.genericError,
+        errorDetails: MobileScannerErrorDetails(message: '  Camera in use  '),
+      ),
+    );
+
+    expect(find.text('Camera in use'), findsOneWidget);
+  });
+
+  testWidgets('a whitespace-only platform detail falls back', (tester) async {
+    await pumpError(
+      tester,
+      const MobileScannerException(
+        errorCode: MobileScannerErrorCode.genericError,
+        errorDetails: MobileScannerErrorDetails(message: '   '),
+      ),
+    );
+
+    expect(
+      find.text(MobileScannerErrorCode.genericError.message),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('a detail-less generic failure falls back to the code message', (
     tester,
   ) async {

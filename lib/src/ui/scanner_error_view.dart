@@ -69,10 +69,13 @@ class ScannerErrorView extends StatelessWidget {
       icon = Icons.error_outline;
       title = labels.cameraErrorTitle;
       // Prefer the platform's own detail, then the error code's message, then
-      // the generic copy — so a real diagnostic is never swallowed.
+      // the generic copy — so a real diagnostic is never swallowed. The detail
+      // is displayed trimmed, matching the emptiness test: platform messages
+      // are not guaranteed to arrive without surrounding whitespace.
+      final detail = error.errorDetails?.message?.trim();
       message =
-          error.errorDetails?.message?.trim().isNotEmpty ?? false
-              ? error.errorDetails!.message!
+          detail != null && detail.isNotEmpty
+              ? detail
               : (error.errorCode.message.isNotEmpty
                   ? error.errorCode.message
                   : labels.cameraErrorMessage);
