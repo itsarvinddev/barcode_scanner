@@ -641,16 +641,22 @@ The native code in your APK comes from `mobile_scanner`, not from this package
 
 ### "Your app uses plugins that apply Kotlin Gradle Plugin (KGP): mobile_scanner"
 
-With `mobile_scanner` 7.4.0 the build **works** on AGP 9 with built-in Kotlin —
-its `apply plugin: 'kotlin-android'` is guarded by an AGP-version check that
-correctly skips it. The warning still prints because Flutter detects KGP usage by
-*text-scanning* the plugin's `build.gradle`, so the guarded line matches
-regardless of whether it runs.
+Fixed upstream in `mobile_scanner` 7.4.1, which this package requires — so a
+fresh `flutter pub get` resolves it and the warning is gone. If you have a
+lockfile pinning an older version, run `flutter pub upgrade mobile_scanner`.
 
-There is nothing this package can do about it, and nothing you need to do about
-it: it is a warning, not an error. Setting `android.builtInKotlin=true` in your
-own `android/gradle.properties` removes the separate *app-level* warning, but not
-this one. The line will disappear when `mobile_scanner` restructures that file.
+**Run `flutter clean` after that upgrade.** 7.4.1 moved the plugin's Gradle
+files from Groovy to the Kotlin DSL, and a build directory left over from 7.4.0
+fails with `cannot find symbol: class MobileScannerPlugin` — the stale outputs
+are reused and the plugin's Kotlin sources are never recompiled. It looks like a
+broken release; it is just a dirty build.
+
+For the curious: it was always a false positive. The guarded
+`apply plugin: 'kotlin-android'` never actually ran on AGP 9, but Flutter
+detects KGP usage by *text-scanning* the plugin's `build.gradle` with a regex,
+so a line-initial `apply plugin` matched whether or not its enclosing `if` was
+taken. 7.4.1 converts those files to the Kotlin DSL, which the Groovy regex no
+longer matches.
 
 ### Black preview, or the camera never comes back from the background
 

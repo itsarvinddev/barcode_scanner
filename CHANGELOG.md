@@ -1,3 +1,22 @@
+## 8.0.1
+
+- Raised the floor to `mobile_scanner >= 7.4.1`, published a few hours after
+  8.0.0's dependency audit. It fixes the false-positive
+  `plugins that apply Kotlin Gradle Plugin (KGP): mobile_scanner` warning on
+  AGP 9 by moving the plugin's Gradle files to the Kotlin DSL, and — more
+  importantly — barcode scanning permanently stalling after a leaked camera
+  frame, a host-app crash when CameraX fails to initialise, and an
+  `EXC_BAD_ACCESS` on iOS when the app is terminated with the camera running.
+  8.0.0's `>=7.4.0` constraint already resolved 7.4.1 for a fresh `pub get`;
+  this stops an existing lockfile from holding anyone on 7.4.0.
+- Corrected the README's troubleshooting entry for that warning, which said it
+  could not be fixed and would keep printing.
+- Documented that upgrading across 7.4.0 -> 7.4.1 needs a `flutter clean`.
+  That release moved the plugin's Gradle files from Groovy to the Kotlin DSL,
+  and a build directory left over from 7.4.0 fails with
+  `cannot find symbol: class MobileScannerPlugin`. Verified: the build fails
+  incrementally and succeeds after a clean.
+
 ## 8.0.0
 
 A rewrite. Every camera capability of `mobile_scanner` 7.4.0 is now a plain
