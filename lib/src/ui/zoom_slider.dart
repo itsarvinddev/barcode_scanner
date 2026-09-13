@@ -37,7 +37,25 @@ class ScannerZoomSlider extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = (theme ?? ScannerTheme.of(context)).resolve();
 
-    final slider = SliderTheme(
+    Widget slider = Slider(
+      value: value.clamp(0.0, 1.0),
+      onChanged: onChanged,
+      semanticFormatterCallback: (v) => '${(v * 100).round()}%',
+    );
+
+    // [Slider] asserts that a `flutter/material` [Material] is above it and
+    // throws "No Material widget found" otherwise. Inside the full-screen
+    // scanner the Scaffold provides one, but an embedded scanner — or this
+    // slider on its own — can sit in a page with none: a bare WidgetsApp, or
+    // an app built on `package:material_ui`, whose Material is a different
+    // type since Flutter 3.47. A transparent Material paints nothing, and is
+    // only added when no Material is there already, so a classic app's tree
+    // is unchanged.
+    if (Material.maybeOf(context) == null) {
+      slider = Material(type: MaterialType.transparency, child: slider);
+    }
+
+    slider = SliderTheme(
       data: SliderThemeData(
         activeTrackColor: palette.reticleColor,
         inactiveTrackColor: palette.controlBackgroundColor,
@@ -46,11 +64,7 @@ class ScannerZoomSlider extends StatelessWidget {
         trackHeight: 3,
         thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
       ),
-      child: Slider(
-        value: value.clamp(0.0, 1.0),
-        onChanged: onChanged,
-        semanticFormatterCallback: (v) => '${(v * 100).round()}%',
-      ),
+      child: slider,
     );
 
     final labelled = Semantics(

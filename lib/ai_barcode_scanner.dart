@@ -42,3 +42,4 @@ export 'src/utils/barcode_extensions.dart'
     show AiBarcodeCaptureX, AiBarcodeFormatX, AiBarcodeX, BarcodeField;
 export 'src/utils/platform_support.dart' show ScannerPlatformSupport;
 export 'src/utils/scan_validators.dart' show BarcodeFormatSets, ScanValidators;
+export 'src/utils/scanner_image.dart' show ScannerImage;

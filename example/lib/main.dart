@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'demos/batch_scan_page.dart';
 import 'demos/embedded_scanner_page.dart';
 import 'demos/full_control_page.dart';
+import 'demos/sample_images.dart';
 import 'demos/themed_scanner_page.dart';
 
 void main() => runApp(const ExampleApp());
@@ -139,6 +140,29 @@ class _HomePageState extends State<HomePage> {
               _showResult(capture?.firstBarcode);
             },
           ),
+          _DemoTile(
+            icon: Icons.image_search_outlined,
+            title: 'Scan image bytes',
+            subtitle:
+                'A gallery picker that returns bytes — which works on the web '
+                'too.',
+            onTap: () async {
+              final capture = await showAiBarcodeScanner(
+                context,
+                labels: const ScannerLabels(galleryButton: 'Scan a sample'),
+                galleryImagePicker: _pickSampleImage,
+                onGalleryScanError: (error, _) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Could not read that image: $error'),
+                    ),
+                  );
+                },
+              );
+              _showResult(capture?.firstBarcode);
+            },
+          ),
           const _SectionHeader('Scan modes'),
           _DemoTile(
             icon: Icons.playlist_add_check_outlined,
@@ -220,6 +244,45 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Stands in for a file picker that hands out bytes, as most do on the web.
+  ///
+  /// Anything that yields an encoded image works the same way: wrap bytes in
+  /// `ScannerImage.bytes`, an `XFile` in `ScannerImage.xFile`, or a file path
+  /// in `ScannerImage.path`. Returning `null` means the user cancelled.
+  Future<ScannerImage?> _pickSampleImage(BuildContext context) {
+    return showDialog<ScannerImage>(
+      context: context,
+      builder:
+          (context) => SimpleDialog(
+            title: const Text('Pick a sample image'),
+            children: <Widget>[
+              SimpleDialogOption(
+                onPressed:
+                    () => Navigator.of(context).pop(
+                      ScannerImage.bytes(
+                        sampleQrPng,
+                        name: 'sample_qr.png',
+                        mimeType: 'image/png',
+                      ),
+                    ),
+                child: const Text('QR code'),
+              ),
+              SimpleDialogOption(
+                onPressed:
+                    () => Navigator.of(context).pop(
+                      ScannerImage.bytes(
+                        sampleEan13Png,
+                        name: 'sample_ean13.png',
+                        mimeType: 'image/png',
+                      ),
+                    ),
+                child: const Text('EAN-13 barcode'),
+              ),
+            ],
+          ),
     );
   }
 

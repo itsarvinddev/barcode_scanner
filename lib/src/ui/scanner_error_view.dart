@@ -4,6 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../config/scanner_labels.dart';
 import '../config/scanner_theme.dart';
 import '../utils/platform_support.dart';
+import 'scanner_material_context.dart';
 
 /// The screen shown when the camera cannot start.
 ///
@@ -30,6 +31,12 @@ class ScannerErrorView extends StatelessWidget {
   final ScannerLabels labels;
 
   /// Palette override; defaults to the [ScannerTheme] in scope.
+  ///
+  /// The filled retry button is the exception in an app with a
+  /// `flutter/material` [Theme]: there it keeps following the app's
+  /// [ColorScheme], as it did before 8.1.0, even when this is set. Without
+  /// such a [Theme] — an app on `material_ui`, or a bare `WidgetsApp` — it
+  /// takes this palette's accent.
   final ScannerTheme? theme;
 
   /// Called when the user asks to try starting the camera again.
@@ -119,6 +126,22 @@ class ScannerErrorView extends StatelessWidget {
                   if (onRetry != null && !_isUnsupported)
                     FilledButton(
                       onPressed: onRetry,
+                      // A host with a `flutter/material` Theme has always
+                      // coloured this from its ColorScheme, and still does.
+                      // Without one — a `material_ui` app or a bare
+                      // WidgetsApp — Theme.of would return the SDK's baseline
+                      // purple, so the scanner's own accent is used instead.
+                      style:
+                          ScannerMaterialContext.hostProvidesMaterialTheme(
+                                context,
+                              )
+                              ? null
+                              : FilledButton.styleFrom(
+                                backgroundColor:
+                                    palette.controlActiveBackgroundColor,
+                                foregroundColor:
+                                    palette.controlActiveForegroundColor,
+                              ),
                       child: Text(labels.retryButton),
                     ),
                   if (onOpenSettings != null && _isPermissionDenied)
@@ -189,6 +212,7 @@ class ScannerUnsupportedPlatformView extends StatelessWidget {
               const SizedBox(height: 8),
               SelectableText(
                 labels.unsupportedPlatformMessage(platform),
+                contextMenuBuilder: scannerContextMenuBuilder,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: palette.onSurfaceColor!.withValues(alpha: 0.75),

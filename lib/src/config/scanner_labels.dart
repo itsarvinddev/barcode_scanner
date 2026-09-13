@@ -56,6 +56,7 @@ class ScannerLabels {
     this.copiedConfirmation = 'Copied to clipboard',
     this.openAction = 'Open',
     this.shareAction = 'Share',
+    this.dismissSheetLabel = 'Dismiss',
     this.scannedCountLabel = _defaultScannedCount,
     this.unsupportedPlatformTitle = 'Not supported on this platform',
     this.unsupportedPlatformMessage = _defaultUnsupportedPlatform,
@@ -153,6 +154,15 @@ class ScannerLabels {
   /// Label of the "share" action on a result.
   final String shareAction;
 
+  /// Screen-reader label of the dimmed barrier behind a result sheet, which
+  /// closes the sheet when tapped.
+  ///
+  /// Only read when `BarcodeResultSheet.show` presents the sheet itself — in
+  /// an app built on `package:material_ui` or a bare `WidgetsApp`. In a classic
+  /// `MaterialApp` the sheet opens through `showModalBottomSheet`, which labels
+  /// its barrier from the app's Material localizations as before.
+  final String dismissSheetLabel;
+
   /// Builds the "N scanned" badge label for batch mode.
   final String Function(int count) scannedCountLabel;
 
@@ -219,6 +229,7 @@ class ScannerLabels {
     String? copiedConfirmation,
     String? openAction,
     String? shareAction,
+    String? dismissSheetLabel,
     String Function(int count)? scannedCountLabel,
     String? unsupportedPlatformTitle,
     String Function(String platformName)? unsupportedPlatformMessage,
@@ -261,6 +272,7 @@ class ScannerLabels {
       copiedConfirmation: copiedConfirmation ?? this.copiedConfirmation,
       openAction: openAction ?? this.openAction,
       shareAction: shareAction ?? this.shareAction,
+      dismissSheetLabel: dismissSheetLabel ?? this.dismissSheetLabel,
       scannedCountLabel: scannedCountLabel ?? this.scannedCountLabel,
       unsupportedPlatformTitle:
           unsupportedPlatformTitle ?? this.unsupportedPlatformTitle,

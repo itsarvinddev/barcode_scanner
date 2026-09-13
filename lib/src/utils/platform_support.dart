@@ -32,8 +32,27 @@ class ScannerPlatformSupport {
   /// all. `false` on Windows and Linux.
   final bool isSupported;
 
-  /// Whether [MobileScannerController.analyzeImage] works, which is what backs
-  /// the "scan from gallery" button.
+  /// Whether the scanner can read barcodes out of still images: what backs
+  /// `AiBarcodeScannerController.analyzeImage` and `analyzeScannerImage`, and
+  /// therefore the "scan from gallery" button.
+  ///
+  /// On Android, iOS and macOS the OS decodes the image, through
+  /// [MobileScannerController.analyzeImage]. On the web, where that method
+  /// still throws [UnsupportedError] — so calling it through
+  /// `AiBarcodeScannerController.raw` does not work there — the scanner uses
+  /// a built-in decoder instead: the browser decodes the image and zxing-wasm
+  /// reads it. zxing-wasm is loaded from jsDelivr the first time an image is
+  /// scanned, unless `mobile_scanner` already put it on the page for the
+  /// camera, so a page with a Content Security Policy has to allow it; the
+  /// error thrown when it cannot load names the hosts involved. An app that
+  /// cannot allow them, or works offline, can pass
+  /// `AiBarcodeScanner.galleryImageAnalyzer` to decode images its own way.
+  ///
+  /// On the web this stays `true` even where a scanner hides its gallery
+  /// button: one given a ZXing-js mirror through
+  /// `AiBarcodeScanner.webBarcodeLibraryScriptUrl` does, because the built-in
+  /// decoder cannot use that library, but the controller's image analysis
+  /// still works, loading zxing-wasm from jsDelivr as usual.
   ///
   /// Note that this is `true` for iOS as a platform but always fails on the
   /// iOS *Simulator*, which is a simulator restriction rather than a platform
@@ -147,8 +166,10 @@ class ScannerPlatformSupport {
 
   static const _web = ScannerPlatformSupport._(
     isSupported: true,
-    // `analyzeImage` is not implemented by the web backend.
-    analyzeImage: false,
+    // `mobile_scanner`'s web backend does not implement `analyzeImage`
+    // (juliansteenbakker/mobile_scanner#1494); the scanner's own zxing-wasm
+    // decoder reads still images there instead.
+    analyzeImage: true,
     returnImage: false,
     // Supported since mobile_scanner 7.2.1: the web backend filters detections
     // to the scan window in Dart, using the corner points below.

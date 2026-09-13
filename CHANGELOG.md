@@ -1,3 +1,160 @@
+## 8.1.0
+
+Scanning from the gallery now works on the web, and the scanner works inside
+apps built on Flutter 3.47's `material_ui`. No API breaks, the SDK floor stays
+at Dart 3.7 / Flutter 3.29, and two gallery callbacks are deprecated in favour
+of more capable ones. See the
+[migration guide](https://github.com/itsarvinddev/barcode_scanner/blob/master/MIGRATION_GUIDE.md#80--81-optional)
+— moving over is optional until 9.0.0.
+
+### Added
+
+- **Scan from gallery on the web**
+  ([#199](https://github.com/itsarvinddev/barcode_scanner/issues/199)).
+  `mobile_scanner`'s web backend still throws `UnsupportedError` from
+  `analyzeImage`
+  ([juliansteenbakker/mobile_scanner#1494](https://github.com/juliansteenbakker/mobile_scanner/issues/1494)),
+  which is why the gallery button used to hide itself in the browser. The
+  package now brings its own still-image decoder there: the browser decodes the
+  picked file — any format it can display, with EXIF orientation applied — and
+  zxing-wasm 3.1.3, the same build `mobile_scanner` uses for the camera, reads
+  the pixels. Large photos are read downscaled first, and at full size only if
+  that finds nothing — never above 16,777,216 pixels, iOS Safari's canvas
+  limit. **The gallery button now appears on the web by default**,
+  and `ScannerPlatformSupport.current.analyzeImage` is `true` there. It loads
+  zxing-wasm from `webBarcodeLibraryScriptUrl` when an app hosts the library
+  itself; with a `WebBarcodeReader.zxingJs` mirror, which it cannot use, the
+  button stays hidden on the web unless `galleryImageAnalyzer` is given.
+- **`ScannerImage`** — a still image to scan, given as a file path
+  (`ScannerImage.path`), encoded bytes (`ScannerImage.bytes`) or an `XFile`
+  (`ScannerImage.xFile`), with `readAsBytes()` to read any of them. Bytes work
+  on every platform: on Android, iOS and macOS, whose decoders only open files,
+  they are written to a temporary file for the analysis and deleted straight
+  afterwards.
+- **`galleryImagePicker`** on `AiBarcodeScanner`, `AiBarcodeScanner.embedded`
+  and `showAiBarcodeScanner`. It replaces the built-in `image_picker` call and
+  returns a `ScannerImage`, so a picker that only hands out bytes — a web file
+  input, the clipboard, a download — can feed the scanner. The picked image
+  still runs through `validator`, feedback and the overlay flash.
+- **`onGalleryImagePick`** — called with every picked `ScannerImage`, or
+  `null` when the user cancelled, before the image is analysed.
+- **`galleryImageAnalyzer`** — replaces the scanner's own decoding of picked
+  images, on every platform. It receives the image and the formats the scanner
+  is restricted to, and returns a `BarcodeCapture`. Use it for a web app whose
+  Content Security Policy cannot allow jsDelivr, an offline or self-hosted
+  deployment, or a decoder of your own; the built-in web decoder is then never
+  loaded.
+- **`AiBarcodeScannerController.analyzeScannerImage`** — scans a
+  `ScannerImage` your app obtained some other way, such as from a share intent
+  or the clipboard. It is what the gallery button uses.
+- **`AiBarcodeScannerController.analyzeImage` works on the web.** The path
+  there is a URL the page can fetch: a `blob:` URL (which is what `XFile.path`
+  is in the browser), a `data:` URL, or an `http(s):` URL the page is allowed
+  to read. `mobile_scanner` is still asked first, so its own implementation
+  takes over the day it ships one. `controller.raw.analyzeImage` — the
+  unwrapped `mobile_scanner` call — still throws on the web.
+- `showAiBarcodeScanner` also accepts `onGalleryScanError`.
+- The example app has a "Scan image bytes" demo: a gallery picker that returns
+  bytes, which works on the web too.
+- CI runs the web decoder's tests in Chrome under both dart2js and dart2wasm,
+  whose JS interop differs.
+
+### Flutter 3.47 and `material_ui`
+
+Flutter now publishes Material and Cupertino as the separate `material_ui` and
+`cupertino_ui` packages (usable from Flutter 3.44), while
+`package:flutter/material.dart` still ships in the SDK. A `material_ui`
+`MaterialApp` provides its own `Theme`, `MaterialLocalizations` and
+`ScaffoldMessenger`: types that the
+`flutter/material` widgets this package is built from cannot see. Without
+`MaterialUiCompatibilityBridge`, the scanner threw "No MaterialLocalizations
+found" whenever it showed its app bar (as `showAiBarcodeScanner` does by
+default), and `BarcodeResultSheet.show` threw from `showModalBottomSheet`
+([#198](https://github.com/itsarvinddev/barcode_scanner/issues/198)).
+
+- **The scanner works inside `material_ui` apps without
+  `MaterialUiCompatibilityBridge`**, in any locale — and in a bare `WidgetsApp`.
+  The `flutter/material` localizations it needs are supplied to its own subtree
+  only when missing, layered over the app's so the app's locale and text
+  direction still apply.
+- **`BarcodeResultSheet.show` opens in those apps** on a lightweight route of its
+  own, with the same slide-up entrance, a dimmed barrier that dismisses it, and
+  drag-down to dismiss. The barrier's screen-reader label is the new
+  `ScannerLabels.dismissSheetLabel`.
+- **Copying from the result sheet is confirmed without a `ScaffoldMessenger`.**
+  Where there is none to show the "Copied" snack bar, the copy button itself
+  briefly shows the confirmation and announces it to screen readers; the
+  confirmation used to be skipped silently.
+- **The embedded scanner's zoom slider** no longer throws "No Material widget
+  found" on a page without a `flutter/material` `Material` — which includes a
+  `material_ui` `Scaffold`, even with the bridge installed.
+- **Controls that follow the app's `Theme`** — the retry and open buttons, the
+  disabled batch "Done" button, the disabled copy and share actions — take
+  their colours from the `ScannerTheme` when there is no `flutter/material`
+  `Theme`, instead of the SDK's baseline purple and near-black.
+- **`ScannerTheme.fromColors`** derives a scanner theme from individual colours
+  — only `primary` is required — so a `material_ui` `ColorScheme`, which
+  `ScannerTheme.fromColorScheme` cannot accept, can still theme the scanner.
+  Given the same five colours both produce an identical theme;
+  `fromColorScheme` now delegates to it.
+- **Nothing changes in a classic `MaterialApp`.** The result sheet is still
+  `showModalBottomSheet`, copying still shows a `SnackBar`, the controls still
+  follow the app's `ColorScheme`, and the scanner inserts no localizations or
+  `Material` of its own.
+- The package keeps importing `flutter/material` throughout 8.x. Moving to
+  `material_ui` would take theme and localizations away from every app that
+  has not migrated — there is no reverse bridge — and would raise the Flutter
+  floor to 3.44, so, as Flutter advises for this migration, it is being treated
+  as a breaking change. **The full migration is planned for 9.0.0.**
+
+### Deprecated
+
+- **`imagePicker`** → `galleryImagePicker`. Return
+  `ScannerImage.path(path)` for the same behaviour as before. Passing both
+  trips an assertion.
+- **`onImagePick`** → `onGalleryImagePick`. It is still called, after
+  `onGalleryImagePick`, for a cancelled pick and for any image with a path, but
+  not for an image picked as bytes, which has none.
+- Both keep working throughout 8.x and are planned for removal in 9.0.0.
+  Passing either to `AiBarcodeScanner` or `AiBarcodeScanner.embedded` now
+  produces a `deprecated_member_use` info in the analyzer, which
+  `flutter analyze --fatal-infos` treats as a failure.
+
+### Notes
+
+- **On the web, the first scanned image downloads zxing-wasm from jsDelivr**: a
+  38 KB script (13 KB compressed) from `cdn.jsdelivr.net`, then its WebAssembly
+  binary from `fastly.jsdelivr.net` — roughly 460 KB compressed, 1.1 MB
+  uncompressed, and cached by the browser afterwards. Nothing is downloaded
+  until an image is scanned, and nothing at all when `mobile_scanner` has
+  already loaded zxing-wasm for the camera.
+- **A Content Security Policy has to allow it**: `https://cdn.jsdelivr.net` and
+  `'wasm-unsafe-eval'` in `script-src`, and `https://fastly.jsdelivr.net` in
+  `connect-src` — plus `blob:`, through which a picked file is read back, and
+  `data:` if you pass `data:` URLs to `analyzeImage` or `ScannerImage.path`.
+  When the decoder cannot load, or the image cannot be read, the scan fails
+  with a `MobileScannerBarcodeException` that says what to allow. A failed
+  download is not remembered — not even one that failed under the camera's
+  zxing-wasm reader — so the next scan tries again. Apps that cannot allow
+  these hosts, or that work offline, can pass `galleryImageAnalyzer`.
+- The gallery button is part of the live scanner's controls, so it does not
+  appear over the error screen shown when the camera cannot start. To scan
+  images without a camera, call `analyzeScannerImage` from your own UI.
+- `AiBarcodeScannerController.analyzeImage` and `analyzeScannerImage` now run
+  one analysis at a time per controller on Android, iOS and macOS. On Android,
+  `mobile_scanner` tracks only one: a call that overlapped another used to
+  leave the earlier one waiting forever.
+- In a `material_ui` app, the few strings the scanner does not render itself —
+  the text selection toolbar and some framework tooltips — use the SDK's English
+  defaults. Everything in `ScannerLabels` is unaffected.
+- The README's Android minimums were understated: `mobile_scanner` 7.4.1 needs
+  Android Gradle Plugin 8.9.1+, compileSdk 36, minSdk 23 and Kotlin Gradle
+  Plugin 2.x, which apps created from Flutter 3.29-era templates have to raise.
+  Nothing changed in 8.1.0 itself.
+- `web: ^1.0.0` is now a direct dependency, for the web decoder. It was already
+  required by `mobile_scanner` with the same constraint, so resolution does not
+  change.
+
 ## 8.0.1
 
 - Raised the floor to `mobile_scanner >= 7.4.1`, published a few hours after

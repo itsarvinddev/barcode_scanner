@@ -1,5 +1,129 @@
 # Migration Guide
 
+## 8.0 → 8.1 (optional)
+
+8.1 has no API breaks, and most apps need no change. Two gallery
+callbacks are deprecated in favour of versions built on `ScannerImage`, which
+can carry bytes or an `XFile` as well as a path — the only kind of image a web
+picker can hand out. The old callbacks keep working throughout 8.x and are
+planned for removal in 9.0.0.
+
+Passing either one now reports a `deprecated_member_use` info in the analyzer.
+If your CI runs `flutter analyze --fatal-infos`, that fails the build: move to
+the replacement below, or put `// ignore: deprecated_member_use` above the
+argument until you do.
+
+| 8.0 | 8.1 |
+| --- | --- |
+| `imagePicker: (context) async => path` | `galleryImagePicker: (context) async => ScannerImage.path(path)` |
+| `onImagePick: (path) { … }` | `onGalleryImagePick: (image) { … }` |
+
+### `imagePicker` → `galleryImagePicker`
+
+```dart
+// Before
+AiBarcodeScanner(
+  imagePicker: (context) async => myFilePicker(),
+)
+
+// After
+AiBarcodeScanner(
+  galleryImagePicker: (context) async {
+    final path = await myFilePicker();
+    return path == null ? null : ScannerImage.path(path);
+  },
+)
+```
+
+A path is analysed exactly as before. If your picker produces an `XFile` or
+bytes, there is no need to reduce it to a path first — return
+`ScannerImage.xFile(file)` or `ScannerImage.bytes(bytes)`. That is also what
+makes a custom picker work on the web, where there are no file paths:
+
+```dart
+AiBarcodeScanner(
+  galleryImagePicker: (context) async {
+    final file = await ImagePicker().pickImage(source: ImageSource.camera);
+    return file == null ? null : ScannerImage.xFile(file);
+  },
+)
+```
+
+Passing both `imagePicker` and `galleryImagePicker` trips an assertion.
+
+### `onImagePick` → `onGalleryImagePick`
+
+```dart
+// Before
+AiBarcodeScanner(
+  onImagePick: (path) => debugPrint('Picked $path'),
+)
+
+// After
+AiBarcodeScanner(
+  onGalleryImagePick: (image) => debugPrint('Picked ${image?.path}'),
+)
+```
+
+`image` is `null` when the user cancelled. The new callback sees every pick,
+whichever picker produced it; `onImagePick` is still called for a cancelled pick
+and for any image with a path, but never for one picked as bytes, which has no
+path. To get at the contents of any image, use `await image.readAsBytes()`.
+
+### The gallery button now appears on the web
+
+8.0 hid it there, because `mobile_scanner` cannot analyse images in a browser.
+8.1 decodes them itself, with zxing-wasm loaded from jsDelivr the first time an
+image is scanned — so a page with a Content Security Policy needs to allow it
+(see
+[Scanning images on the web](https://github.com/itsarvinddev/barcode_scanner#scanning-images-on-the-web)).
+To keep the button hidden on the web:
+
+```dart
+import 'package:flutter/foundation.dart' show kIsWeb;
+
+AiBarcodeScanner(
+  galleryButtonType: kIsWeb ? GalleryButtonType.none : GalleryButtonType.filled,
+)
+```
+
+### `ScannerPlatformSupport.analyzeImage` is `true` on the web
+
+In 8.0 the flag described `MobileScannerController.analyzeImage`, and was
+`false` in the browser. From 8.1 it describes the scanner's own image analysis —
+`AiBarcodeScannerController.analyzeImage`, `analyzeScannerImage` and the gallery
+button — which works on the web. `controller.raw.analyzeImage` still throws
+`UnsupportedError` there, so code that checks the flag and then calls
+`mobile_scanner` directly has to switch to the facade, or rule out the web:
+
+```dart
+// Before
+if (ScannerPlatformSupport.current.analyzeImage) {
+  capture = await controller.raw.analyzeImage(path);
+}
+
+// After: the facade, which works on the web too
+if (ScannerPlatformSupport.current.analyzeImage) {
+  capture = await controller.analyzeImage(path);
+}
+
+// Or keep calling mobile_scanner, but not on the web
+if (!kIsWeb && ScannerPlatformSupport.current.analyzeImage) {
+  capture = await controller.raw.analyzeImage(path);
+}
+```
+
+### Apps built on `material_ui`
+
+If you added `MaterialUiCompatibilityBridge` only because the scanner crashed
+without it, 8.1 no longer needs it. Without the bridge the scanner cannot read
+your `material_ui` `Theme`, so pass your colours to `ScannerTheme.fromColors`
+(see
+[Using with material_ui](https://github.com/itsarvinddev/barcode_scanner#using-with-material_ui-flutter-347)).
+Apps on `flutter/material` need no change.
+
+---
+
 ## 7.x → 8.0.0
 
 Version 8 is a rewrite. Almost every fix in it required changing behaviour that

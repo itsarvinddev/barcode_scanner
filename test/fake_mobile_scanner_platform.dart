@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -47,6 +48,27 @@ class FakeMobileScannerPlatform extends MobileScannerPlatform {
   final List<Rect?> scanWindowUpdates = <Rect?>[];
   final List<double> zoomScaleCalls = <double>[];
   final List<Offset> focusPointCalls = <Offset>[];
+
+  /// Every path `analyzeImage` was given, in order.
+  final List<String> analyzeImagePaths = <String>[];
+
+  /// The formats passed alongside each entry of [analyzeImagePaths].
+  final List<List<BarcodeFormat>> analyzeImageFormats = <List<BarcodeFormat>>[];
+
+  /// The contents of the file behind each analysed path, or `null` where no
+  /// file existed.
+  ///
+  /// Read synchronously inside `analyzeImage`, because a temporary file the
+  /// scanner wrote for bytes is deleted as soon as the call completes.
+  final List<List<int>?> analyzedFileBytes = <List<int>?>[];
+
+  /// When set, `analyzeImage` awaits this, after recording the call and
+  /// before returning, so a test can hold an analysis open or fail one.
+  Future<void> Function(String path)? analyzeImageGate;
+
+  /// The most `analyzeImage` calls that were ever in progress at once.
+  int maxConcurrentAnalyzeImageCalls = 0;
+  int _analyzeImageCallsInProgress = 0;
   int toggleTorchCount = 0;
   int stopCount = 0;
   int disposeCount = 0;
@@ -138,8 +160,22 @@ class FakeMobileScannerPlatform extends MobileScannerPlatform {
     String path, {
     List<BarcodeFormat> formats = const <BarcodeFormat>[],
   }) async {
-    final error = analyzeImageError;
-    if (error != null) throw error;
-    return analyzeImageResult;
+    analyzeImagePaths.add(path);
+    analyzeImageFormats.add(formats);
+    final file = File(path);
+    analyzedFileBytes.add(file.existsSync() ? file.readAsBytesSync() : null);
+
+    _analyzeImageCallsInProgress++;
+    if (_analyzeImageCallsInProgress > maxConcurrentAnalyzeImageCalls) {
+      maxConcurrentAnalyzeImageCalls = _analyzeImageCallsInProgress;
+    }
+    try {
+      await analyzeImageGate?.call(path);
+      final error = analyzeImageError;
+      if (error != null) throw error;
+      return analyzeImageResult;
+    } finally {
+      _analyzeImageCallsInProgress--;
+    }
   }
 }

@@ -92,7 +92,7 @@ class _CollectedList extends StatelessWidget {
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: collected.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      separatorBuilder: (_, _) => const SizedBox(width: 8),
                       itemBuilder:
                           (context, index) => Chip(
                             avatar: Icon(collected[index].typeIcon, size: 16),

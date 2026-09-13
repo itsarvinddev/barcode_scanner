@@ -5,8 +5,9 @@ import 'package:flutter/material.dart';
 /// The scanner draws on top of a live camera preview, which is unpredictable
 /// and usually dark, so the defaults are deliberately *not* derived from the
 /// app's [ColorScheme]: they are hand-picked to stay legible over any frame.
-/// Use [ScannerTheme.fromColorScheme] when you would rather match your brand,
-/// or set individual fields to override just the parts you care about.
+/// Use [ScannerTheme.fromColorScheme] — or [ScannerTheme.fromColors] in an app
+/// built on `package:material_ui` — when you would rather match your brand, or
+/// set individual fields to override just the parts you care about.
 ///
 /// Every colour field is nullable. `null` means "use the built-in default",
 /// which is resolved once per build by [resolve].
@@ -42,21 +43,83 @@ class ScannerTheme {
   /// The reticle picks up [ColorScheme.primary] and the controls pick up
   /// [ColorScheme.surface]/[ColorScheme.onSurface], while the dimmed area
   /// outside the scan window stays neutral so the preview remains readable.
+  ///
+  /// [ColorScheme] here is `flutter/material`'s. An app built on
+  /// `package:material_ui` has a `ColorScheme` of a different type, which this
+  /// factory cannot accept; pass its colours to [ScannerTheme.fromColors]
+  /// instead, which derives exactly the same theme.
   factory ScannerTheme.fromColorScheme(ColorScheme scheme) {
-    return ScannerTheme(
-      reticleColor: scheme.primary,
-      reticleSuccessColor: scheme.primary,
-      reticleErrorColor: scheme.error,
-      scanLineColor: scheme.primary,
-      controlBackgroundColor: scheme.surface.withValues(alpha: 0.85),
-      controlForegroundColor: scheme.onSurface,
-      controlActiveBackgroundColor: scheme.primary,
-      controlActiveForegroundColor: scheme.onPrimary,
-      barcodeHighlightColor: scheme.primary,
-      focusRingColor: scheme.primary,
-      surfaceColor: scheme.surface,
-      onSurfaceColor: scheme.onSurface,
+    return ScannerTheme.fromColors(
+      primary: scheme.primary,
+      onPrimary: scheme.onPrimary,
+      surface: scheme.surface,
+      onSurface: scheme.onSurface,
+      error: scheme.error,
     );
+  }
+
+  /// Derives a scanner theme from individual brand colours.
+  ///
+  /// This is [ScannerTheme.fromColorScheme] without the `ColorScheme`: given
+  /// the same five colours it produces an identical theme. It exists because
+  /// Flutter now also publishes Material as the separate
+  /// `package:material_ui`, whose `ColorScheme` is a distinct type from the
+  /// `flutter/material` one this package's API is written against. Plain [Color]s work with either:
+  ///
+  /// ```dart
+  /// final scheme = Theme.of(context).colorScheme; // material_ui's
+  /// AiBarcodeScanner(
+  ///   theme: ScannerTheme.fromColors(
+  ///     primary: scheme.primary,
+  ///     onPrimary: scheme.onPrimary,
+  ///     surface: scheme.surface,
+  ///     onSurface: scheme.onSurface,
+  ///     error: scheme.error,
+  ///   ),
+  /// )
+  /// ```
+  ///
+  /// Only [primary] is required. [onPrimary] defaults to a dark or light
+  /// foreground chosen for contrast against [primary], and [onSurface] to one
+  /// chosen against [surface] — so a light [surface] is never paired with the
+  /// built-in white text. Leaving [surface] or [error] out keeps the built-in
+  /// defaults for the parts they would have coloured.
+  factory ScannerTheme.fromColors({
+    required Color primary,
+    Color? onPrimary,
+    Color? surface,
+    Color? onSurface,
+    Color? error,
+  }) {
+    final foreground =
+        onSurface ?? (surface == null ? null : _contrastingForeground(surface));
+    return ScannerTheme(
+      reticleColor: primary,
+      reticleSuccessColor: primary,
+      reticleErrorColor: error,
+      scanLineColor: primary,
+      controlBackgroundColor: surface?.withValues(alpha: 0.85),
+      controlForegroundColor: foreground,
+      controlActiveBackgroundColor: primary,
+      controlActiveForegroundColor:
+          onPrimary ?? _contrastingForeground(primary),
+      barcodeHighlightColor: primary,
+      focusRingColor: primary,
+      surfaceColor: surface,
+      onSurfaceColor: foreground,
+    );
+  }
+
+  /// A dark or light foreground that stays legible on [background].
+  ///
+  /// Uses the same luminance threshold as
+  /// `ThemeData.estimateBrightnessForColor`, so the choice matches what a
+  /// Material theme would make for the same colour, but with the scanner's own
+  /// near-black and white.
+  static Color _contrastingForeground(Color background) {
+    final luminance = background.computeLuminance();
+    final isLight = (luminance + 0.05) * (luminance + 0.05) > 0.15;
+    return isLight ? const Color(0xFF1C1C1E) : const Color(0xFFFFFFFF);
   }
 
   /// Colour of the scan-window border in its resting state.

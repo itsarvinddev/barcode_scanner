@@ -11,6 +11,7 @@ import 'config/scanner_action.dart';
 import 'config/scanner_feedback.dart';
 import 'config/scanner_labels.dart';
 import 'config/scanner_theme.dart';
+import 'utils/scanner_image.dart';
 
 /// Pushes a full-screen scanner and returns the first accepted detection.
 ///
@@ -25,6 +26,11 @@ import 'config/scanner_theme.dart';
 /// Returns `null` when the user backs out without scanning anything. The
 /// scanner closes itself on the first accepted detection; pass a [validator]
 /// to control what counts as acceptable.
+///
+/// The gallery button uses `image_picker` and the scanner's built-in decoding
+/// unless [galleryImagePicker] or [galleryImageAnalyzer] replace them; both,
+/// along with [onGalleryImagePick] and [onGalleryScanError], behave exactly as
+/// the same-named [AiBarcodeScanner] parameters.
 ///
 /// For anything more involved — batch collection, staying open after a scan,
 /// custom chrome — use [AiBarcodeScanner] directly.
@@ -47,6 +53,14 @@ Future<BarcodeCapture?> showAiBarcodeScanner(
     ScannerAction.close,
   },
   GalleryButtonType galleryButtonType = GalleryButtonType.filled,
+  Future<ScannerImage?> Function(BuildContext context)? galleryImagePicker,
+  void Function(ScannerImage? image)? onGalleryImagePick,
+  Future<BarcodeCapture?> Function(
+    ScannerImage image,
+    List<BarcodeFormat> formats,
+  )?
+  galleryImageAnalyzer,
+  void Function(Object error, StackTrace stackTrace)? onGalleryScanError,
   bool showScanHint = true,
   List<DeviceOrientation>? preferredOrientations,
   VoidCallback? onOpenSettings,
@@ -75,6 +89,10 @@ Future<BarcodeCapture?> showAiBarcodeScanner(
             feedback: feedback,
             enabledActionButtons: enabledActionButtons,
             galleryButtonType: galleryButtonType,
+            galleryImagePicker: galleryImagePicker,
+            onGalleryImagePick: onGalleryImagePick,
+            galleryImageAnalyzer: galleryImageAnalyzer,
+            onGalleryScanError: onGalleryScanError,
             showScanHint: showScanHint,
             preferredOrientations: preferredOrientations,
             onOpenSettings: onOpenSettings,

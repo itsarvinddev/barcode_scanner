@@ -22,10 +22,13 @@ import 'ui/scan_hint.dart';
 import 'ui/scanner_control_button.dart';
 import 'ui/scanner_controls_bar.dart';
 import 'ui/scanner_error_view.dart';
+import 'ui/scanner_material_context.dart';
 import 'ui/scanner_overlay.dart';
 import 'ui/zoom_slider.dart';
 import 'utils/barcode_extensions.dart';
+import 'utils/image_decoder/image_decoder.dart' show useImageDecoderScriptUrl;
 import 'utils/platform_support.dart';
+import 'utils/scanner_image.dart';
 
 /// A complete, ready-to-use barcode scanner.
 ///
@@ -122,8 +125,22 @@ class AiBarcodeScanner extends StatefulWidget {
     this.scanWindow,
     this.restrictDetectionToScanWindow = false,
     this.scanWindowUpdateThreshold = 0.0,
+    // Deprecated here as well as on the fields. An initializing formal does not
+    // inherit its field's annotation, so without these, passing the argument —
+    // which is how apps use both — would not produce a warning at all.
+    @Deprecated(
+      'Use onGalleryImagePick, which also reports images picked as bytes. '
+      'This feature was deprecated after v8.0.1.',
+    )
     this.onImagePick,
+    @Deprecated(
+      'Use galleryImagePicker, which can also return bytes or an XFile. '
+      'This feature was deprecated after v8.0.1.',
+    )
     this.imagePicker,
+    this.galleryImagePicker,
+    this.onGalleryImagePick,
+    this.galleryImageAnalyzer,
     this.onGalleryScanError,
     this.onDispose,
     this.onClose,
@@ -132,7 +149,11 @@ class AiBarcodeScanner extends StatefulWidget {
     this.onOpenSettings,
     this.onZoomChanged,
     this.onTorchChanged,
-  }) : _embedded = false;
+  }) : assert(
+         imagePicker == null || galleryImagePicker == null,
+         'Pass galleryImagePicker or the deprecated imagePicker, not both.',
+       ),
+       _embedded = false;
 
   /// Creates a scanner without a [Scaffold], for embedding in your own page.
   ///
@@ -198,8 +219,20 @@ class AiBarcodeScanner extends StatefulWidget {
     this.scanWindow,
     this.restrictDetectionToScanWindow = false,
     this.scanWindowUpdateThreshold = 0.0,
+    // Deprecated on the parameters too; see the default constructor.
+    @Deprecated(
+      'Use onGalleryImagePick, which also reports images picked as bytes. '
+      'This feature was deprecated after v8.0.1.',
+    )
     this.onImagePick,
+    @Deprecated(
+      'Use galleryImagePicker, which can also return bytes or an XFile. '
+      'This feature was deprecated after v8.0.1.',
+    )
     this.imagePicker,
+    this.galleryImagePicker,
+    this.onGalleryImagePick,
+    this.galleryImageAnalyzer,
     this.onGalleryScanError,
     this.onDispose,
     this.onScannerStarted,
@@ -207,7 +240,11 @@ class AiBarcodeScanner extends StatefulWidget {
     this.onOpenSettings,
     this.onZoomChanged,
     this.onTorchChanged,
-  }) : _embedded = true,
+  }) : assert(
+         imagePicker == null || galleryImagePicker == null,
+         'Pass galleryImagePicker or the deprecated imagePicker, not both.',
+       ),
+       _embedded = true,
        preferredOrientations = null,
        restoreOrientationsOnDispose = null,
        extendBodyBehindAppBar = true,
@@ -313,6 +350,25 @@ class AiBarcodeScanner extends StatefulWidget {
   /// `mobile_scanner` fetches zxing from a public CDN on first use. Point this
   /// at your own copy when a content security policy or an air-gapped
   /// deployment forbids that.
+  ///
+  /// The same copy serves gallery scans: the built-in web decoder loads
+  /// zxing-wasm from this URL instead of jsDelivr. With the default
+  /// [WebBarcodeReader.auto], and with [WebBarcodeReader.zxingWasm], the URL
+  /// is already that library — the IIFE reader build of zxing-wasm 3.1.3,
+  /// `dist/iife/reader/index.js` — so nothing else is needed. zxing-wasm still
+  /// downloads its WebAssembly binary from `fastly.jsdelivr.net`, for the
+  /// camera and gallery alike.
+  ///
+  /// With [WebBarcodeReader.zxingJs] the URL is a different library, which
+  /// the decoder cannot use, so the gallery button stays hidden on the web
+  /// unless [galleryImageAnalyzer] is given. That exclusion follows this
+  /// widget's own [webBarcodeReader], not a reader another scanner on the page
+  /// selected: a scanner that leaves [webBarcodeReader] unset hands its URL to
+  /// the decoder as zxing-wasm, so give scanners that pass a ZXing-js mirror
+  /// [WebBarcodeReader.zxingJs] explicitly.
+  ///
+  /// Like `mobile_scanner`'s own setting, this applies to the whole page, and
+  /// the first scanner to set it wins.
   final String? webBarcodeLibraryScriptUrl;
 
   // ---------------------------------------------------------------------------
@@ -522,13 +578,99 @@ class AiBarcodeScanner extends StatefulWidget {
 
   /// Called with the path of the image the user picked, or `null` if they
   /// cancelled.
+  ///
+  /// Superseded by [onGalleryImagePick], which reports every picked image
+  /// rather than only its path. Still called, after [onGalleryImagePick], for
+  /// a cancelled pick and for any image that has a path — which on the web
+  /// includes the `blob:` URL an `XFile` carries — but not for an image picked
+  /// as [ScannerImage.bytes], which has none.
+  @Deprecated(
+    'Use onGalleryImagePick, which also reports images picked as bytes. '
+    'This feature was deprecated after v8.0.1.',
+  )
   final void Function(String? path)? onImagePick;
+
+  /// Replaces the built-in `image_picker` call with one that returns a path.
+  ///
+  /// Superseded by [galleryImagePicker], which can return bytes or an `XFile`
+  /// as well as a path. The path returned here is analysed exactly as before,
+  /// and moving over is a one-line change:
+  ///
+  /// ```dart
+  /// galleryImagePicker: (context) async {
+  ///   final path = await myFilePicker();
+  ///   return path == null ? null : ScannerImage.path(path);
+  /// },
+  /// ```
+  ///
+  /// Cannot be combined with [galleryImagePicker].
+  @Deprecated(
+    'Use galleryImagePicker, which can also return bytes or an XFile. '
+    'This feature was deprecated after v8.0.1.',
+  )
+  final Future<String?> Function(BuildContext context)? imagePicker;
 
   /// Replaces the built-in `image_picker` call.
   ///
-  /// Return the path of an image to analyse, or `null` to cancel. The picked
-  /// image still runs through the normal validation and feedback pipeline.
-  final Future<String?> Function(BuildContext context)? imagePicker;
+  /// Return the image to analyse, or `null` if the user cancelled. Wrap
+  /// whatever your picker produces: an `XFile` with [ScannerImage.xFile], a
+  /// path with [ScannerImage.path], or encoded bytes with
+  /// [ScannerImage.bytes]:
+  ///
+  /// ```dart
+  /// AiBarcodeScanner(
+  ///   galleryImagePicker: (context) async {
+  ///     // Any picker that yields the encoded file: a web file input, the
+  ///     // clipboard, a document scanner, a download.
+  ///     final Uint8List? bytes = await pickImageBytes(context);
+  ///     return bytes == null ? null : ScannerImage.bytes(bytes);
+  ///   },
+  /// )
+  /// ```
+  ///
+  /// Bytes work on every platform, including the web, where a picker cannot
+  /// hand out a file path. The picked image still runs through [validator],
+  /// feedback and the overlay flash, exactly like a camera detection.
+  ///
+  /// This only chooses the image; how it is read is up to
+  /// [galleryImageAnalyzer]. Without either, the gallery button uses
+  /// `image_picker` and the scanner's built-in decoding.
+  ///
+  /// Cannot be combined with the deprecated `imagePicker`.
+  final Future<ScannerImage?> Function(BuildContext context)?
+  galleryImagePicker;
+
+  /// Called with the image the user picked, or `null` if they cancelled.
+  ///
+  /// Fires before the image is analysed, whichever picker produced it.
+  final void Function(ScannerImage? image)? onGalleryImagePick;
+
+  /// Replaces the scanner's own decoding of picked images.
+  ///
+  /// By default a picked image is read by
+  /// [AiBarcodeScannerController.analyzeScannerImage]: the OS decoders on
+  /// Android, iOS and macOS, and a built-in zxing-wasm decoder on the web,
+  /// which is loaded from jsDelivr (or [webBarcodeLibraryScriptUrl]) the first
+  /// time an image is scanned. Supply an analyzer when that does not suit — a
+  /// web app whose Content Security Policy cannot allow jsDelivr, an offline
+  /// or self-hosted deployment, or a decoder of your own. It is used on every
+  /// platform, for every picked image, instead of the built-in decoding.
+  ///
+  /// It receives the image and the formats the scanner is restricted to
+  /// (empty meaning every format), read from the live controller so a
+  /// supplied [controller]'s formats are honoured. Return `null` or an empty
+  /// capture when nothing was found. A thrown error is reported through
+  /// [onGalleryScanError], with the same rejection feedback as a failed
+  /// built-in scan.
+  ///
+  /// With an analyzer the gallery button is offered on every platform with
+  /// camera support, even one where
+  /// [ScannerPlatformSupport.analyzeImage] is `false`.
+  final Future<BarcodeCapture?> Function(
+    ScannerImage image,
+    List<BarcodeFormat> formats,
+  )?
+  galleryImageAnalyzer;
 
   /// Called when analysing a picked image fails.
   ///
@@ -607,6 +749,12 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
       final scriptUrl = widget.webBarcodeLibraryScriptUrl;
       if (scriptUrl != null) {
         MobileScannerPlatform.instance.setBarcodeLibraryScriptUrl(scriptUrl);
+        // A mirror means the page cannot load from the CDN, so picked images
+        // are read with the same copy — unless it is ZXing-js, which the
+        // built-in decoder cannot use; see `_canAnalyzeImages`.
+        if (reader != WebBarcodeReader.zxingJs) {
+          useImageDecoderScriptUrl(scriptUrl);
+        }
       }
     }
 
@@ -901,24 +1049,30 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
     unawaited(widget.feedback.play(ScannerFeedbackEvent.control));
 
     try {
-      final String? path;
-      final customPicker = widget.imagePicker;
-      if (customPicker != null) {
-        path = await customPicker(context);
-      } else {
-        final file = await ImagePicker().pickImage(source: ImageSource.gallery);
-        path = file?.path;
+      final image = await _pickImage();
+
+      widget.onGalleryImagePick?.call(image);
+      // The deprecated callback only ever received paths. An image picked as
+      // bytes has none, and reporting it as `null` would read as a cancel.
+      if (image == null || image.path != null) {
+        // ignore: deprecated_member_use_from_same_package
+        widget.onImagePick?.call(image?.path);
       }
+      if (image == null || !mounted) return;
 
-      widget.onImagePick?.call(path);
-      if (path == null) return;
-
-      final capture = await _controller.analyzeImage(
-        path,
-        // Read the formats off the live controller, not the widget: when the
-        // caller supplies a controller, `widget.formats` is asserted empty.
-        formats: _controller.raw.formats,
-      );
+      // Read the formats off the live controller, not the widget: when the
+      // caller supplies a controller, `widget.formats` is asserted empty.
+      final formats = _controller.raw.formats;
+      final analyzer = widget.galleryImageAnalyzer;
+      final BarcodeCapture? capture;
+      if (analyzer != null) {
+        capture = await analyzer(image, formats);
+      } else {
+        capture = await _controller.analyzeScannerImage(
+          image,
+          formats: formats,
+        );
+      }
 
       if (!mounted) return;
 
@@ -950,6 +1104,43 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
     } finally {
       if (mounted) _isPickingImage.value = false;
     }
+  }
+
+  /// Asks whichever picker is configured for an image; `null` means the user
+  /// cancelled.
+  Future<ScannerImage?> _pickImage() async {
+    final picker = widget.galleryImagePicker;
+    if (picker != null) return picker(context);
+
+    // ignore: deprecated_member_use_from_same_package
+    final legacyPicker = widget.imagePicker;
+    if (legacyPicker != null) {
+      final path = await legacyPicker(context);
+      return path == null ? null : ScannerImage.path(path);
+    }
+
+    // Wrapped as an XFile rather than reduced to its path: on native platforms
+    // the path is still what gets analysed, but on the web the path is an
+    // object URL and the file's own bytes are what can be read.
+    final file = await ImagePicker().pickImage(source: ImageSource.gallery);
+    return file == null ? null : ScannerImage.xFile(file);
+  }
+
+  /// Whether a picked image can be read here, so the gallery button is worth
+  /// showing: by the platform, or by the caller's own analyzer.
+  ///
+  /// On the web, a page that mirrors ZXing-js through
+  /// [AiBarcodeScanner.webBarcodeLibraryScriptUrl] is one that cannot load
+  /// scripts from the CDN, and the built-in decoder would have to load
+  /// zxing-wasm from there: its button would fail on every tap. It stays
+  /// hidden, as it was on the web before 8.1.0, unless the app brings an
+  /// analyzer.
+  bool get _canAnalyzeImages {
+    if (widget.galleryImageAnalyzer != null) return true;
+    if (!ScannerPlatformSupport.current.analyzeImage) return false;
+    return !(kIsWeb &&
+        widget.webBarcodeLibraryScriptUrl != null &&
+        widget.webBarcodeReader == WebBarcodeReader.zxingJs);
   }
 
   // ---------------------------------------------------------------------------
@@ -1023,6 +1214,16 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
 
   @override
   Widget build(BuildContext context) {
+    // The scanner is built from `flutter/material` widgets — Scaffold, AppBar,
+    // tooltips, selectable text — some of which throw without Material
+    // localizations. Apps built on `package:material_ui` (Flutter 3.47+) or a
+    // bare WidgetsApp do not provide those, so they are supplied here when,
+    // and only when, they are missing. In a classic MaterialApp this is a
+    // no-op.
+    return ScannerMaterialContext(child: _buildScanner(context));
+  }
+
+  Widget _buildScanner(BuildContext context) {
     final theme = (widget.theme ?? const ScannerTheme()).resolve();
 
     if (!_supported) {
@@ -1254,7 +1455,7 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
 
     if (enabled.contains(ScannerAction.gallery) &&
         widget.galleryButtonType == GalleryButtonType.icon &&
-        support.analyzeImage) {
+        _canAnalyzeImages) {
       controls.add(
         ValueListenableBuilder<bool>(
           valueListenable: _isPickingImage,
@@ -1370,7 +1571,7 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
             final galleryFilled =
                 widget.enabledActionButtons.contains(ScannerAction.gallery) &&
                         widget.galleryButtonType == GalleryButtonType.filled &&
-                        ScannerPlatformSupport.current.analyzeImage
+                        _canAnalyzeImages
                     ? ValueListenableBuilder<bool>(
                       valueListenable: _isPickingImage,
                       builder:
@@ -1392,6 +1593,16 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
                       listenable: _controller,
                       builder: (context, _) {
                         final count = _controller.collected.length;
+                        // The disabled colours (nothing collected yet) come
+                        // from the host's Theme when there is one, as they
+                        // always have. Without one they would be the SDK's
+                        // near-black baseline, unreadable over a dark
+                        // preview, so they are derived from the scanner's
+                        // own palette instead.
+                        final hostTheme =
+                            ScannerMaterialContext.hostProvidesMaterialTheme(
+                              context,
+                            );
                         return FilledButton.icon(
                           onPressed: count == 0 ? null : _finishBatch,
                           icon: ScannerCountBadge(count: count, theme: theme),
@@ -1399,6 +1610,14 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
                           style: FilledButton.styleFrom(
                             backgroundColor: theme.controlBackgroundColor,
                             foregroundColor: theme.controlForegroundColor,
+                            disabledBackgroundColor:
+                                hostTheme ? null : theme.controlBackgroundColor,
+                            disabledForegroundColor:
+                                hostTheme
+                                    ? null
+                                    : theme.controlForegroundColor!.withValues(
+                                      alpha: 0.5,
+                                    ),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 20,
                               vertical: 14,

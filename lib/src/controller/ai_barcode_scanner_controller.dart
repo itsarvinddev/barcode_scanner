@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../utils/image_decoder/image_decoder.dart';
 import '../utils/platform_support.dart';
+import '../utils/scanner_image.dart';
 
 /// A high-level handle on a running scanner.
 ///
@@ -99,6 +101,10 @@ class AiBarcodeScannerController extends ChangeNotifier {
   bool _scanningPaused = false;
   bool _disposed = false;
   final List<Barcode> _collected = <Barcode>[];
+
+  /// Completes when the last image analysis handed to the platform has; see
+  /// [_queueImageAnalysis].
+  Future<void> _imageAnalysisQueue = Future<void>.value();
 
   /// The underlying `mobile_scanner` controller.
   ///
@@ -344,25 +350,202 @@ class AiBarcodeScannerController extends ChangeNotifier {
 
   /// Looks for barcodes in the image file at [path].
   ///
-  /// Returns `null` when nothing was found. Throws
-  /// [MobileScannerBarcodeException] if the platform reported a decoding
-  /// error, and [UnsupportedError] on platforms without image analysis — which
-  /// is the web.
+  /// Returns `null` or an empty capture when nothing was found — which one
+  /// depends on the platform, so treat them alike. Throws
+  /// [MobileScannerBarcodeException] if the image could not be decoded, and
+  /// [UnsupportedError] on platforms without camera support (Windows and
+  /// Linux).
   ///
-  /// The iOS Simulator also cannot analyse images, but that is indistinguishable
-  /// from a device at runtime, so it surfaces as a platform error rather than
-  /// an [UnsupportedError].
+  /// On Android, iOS and macOS [path] is a file path, analysed by the OS. On
+  /// the web it is a URL the page can fetch — typically the `blob:` URL an
+  /// `XFile` from `image_picker` carries — and is read by the scanner's
+  /// built-in decoder, because `mobile_scanner` has no still-image support in
+  /// the browser (juliansteenbakker/mobile_scanner#1494). That decoder loads
+  /// zxing-wasm from jsDelivr on first use; see
+  /// [ScannerPlatformSupport.analyzeImage]. `mobile_scanner` is still asked
+  /// first, so the day it gains web support, its implementation takes over.
+  ///
+  /// The iOS Simulator cannot analyse images either. That cannot be told apart
+  /// from a device ahead of time, so [ScannerPlatformSupport.analyzeImage] is
+  /// still `true` there, and the call itself fails: `mobile_scanner` reports
+  /// it as an [UnsupportedError].
+  ///
+  /// On Android, iOS and macOS analyses run one at a time: a call made while
+  /// another analysis on this controller is in progress waits for it. See
+  /// [analyzeScannerImage].
+  ///
+  /// To analyse bytes or an `XFile` rather than a path, use
+  /// [analyzeScannerImage].
   Future<BarcodeCapture?> analyzeImage(
     String path, {
     List<BarcodeFormat> formats = const <BarcodeFormat>[],
   }) {
+    _throwIfCannotAnalyzeImages();
+    if (kIsWeb) return _analyzeImageUrlOnWeb(path, formats);
+    return _queueImageAnalysis(
+      () => _controller.analyzeImage(path, formats: formats),
+    );
+  }
+
+  /// Looks for barcodes in [image], whether it is a path, encoded bytes or an
+  /// `XFile`.
+  ///
+  /// This is what the gallery button uses, and the way to scan an image your
+  /// app obtained some other way — from the clipboard, a share intent, a
+  /// download:
+  ///
+  /// ```dart
+  /// final capture = await controller.analyzeScannerImage(
+  ///   ScannerImage.bytes(pngBytes),
+  ///   formats: const [BarcodeFormat.qrCode],
+  /// );
+  /// ```
+  ///
+  /// Returns `null` or an empty capture when nothing was found; treat them
+  /// alike. Completes with a [MobileScannerBarcodeException] if the image could
+  /// not be decoded, and with an [UnsupportedError] on platforms without camera
+  /// support (Windows and Linux).
+  ///
+  /// How the image is read depends on the platform:
+  ///
+  /// * **Android, iOS and macOS.** A [ScannerImage.path] goes to
+  ///   `mobile_scanner` untouched, exactly as [analyzeImage] would send it. An
+  ///   [ScannerImage.xFile] is analysed in place when a file exists at its
+  ///   path. Anything else — bytes, or an `XFile.fromData` — is written to a
+  ///   temporary file, because the OS decoders only read files, and the file
+  ///   is deleted as soon as the analysis completes.
+  /// * **The web.** The bytes are decoded by the browser and read by the
+  ///   scanner's built-in zxing-wasm decoder, loaded on first use from
+  ///   jsDelivr, or from the `AiBarcodeScanner.webBarcodeLibraryScriptUrl` of
+  ///   a scanner already on the page. A [ScannerImage.path] is treated as a
+  ///   URL, as in [analyzeImage].
+  ///   A page whose Content Security Policy cannot allow jsDelivr can supply
+  ///   `AiBarcodeScanner.galleryImageAnalyzer` with a decoder of its own.
+  ///
+  /// [formats] restricts detection, as it does for the camera; empty means
+  /// every format.
+  ///
+  /// Calls on this controller may overlap. On Android, iOS and macOS they still
+  /// reach the platform one at a time — together with this controller's
+  /// [analyzeImage] calls, in the order they were made — because
+  /// `mobile_scanner` on Android can only track one analysis: a second one
+  /// would leave the first waiting forever. Analyses started through [raw],
+  /// through another controller, or on a [MobileScannerController] shared via
+  /// [AiBarcodeScannerController.fromMobileScanner] are not serialised with
+  /// these, so run image analyses through a single controller. The web decoder
+  /// reads several images at once.
+  Future<BarcodeCapture?> analyzeScannerImage(
+    ScannerImage image, {
+    List<BarcodeFormat> formats = const <BarcodeFormat>[],
+  }) async {
+    _throwIfCannotAnalyzeImages();
+
+    if (!kIsWeb) {
+      return _queueImageAnalysis(
+        () => withScannerImageFile(
+          image,
+          (path) => _controller.analyzeImage(path, formats: formats),
+        ),
+      );
+    }
+
+    final path = image.path;
+    if (image.bytes == null && !isXFileScannerImage(image) && path != null) {
+      return _analyzeImageUrlOnWeb(path, formats);
+    }
+    return decodeBarcodesFromImageBytes(
+      await _readImageBytesOnWeb(image),
+      formats: formats,
+    );
+  }
+
+  /// Reads [image] in the browser, reporting a failure the way a native
+  /// platform reports a file it cannot open: as a
+  /// [MobileScannerBarcodeException].
+  ///
+  /// An `XFile` — what `image_picker` returns on the web — reads its `blob:`
+  /// URL itself, and `cross_file` reports every failure as a plain [Exception]
+  /// asking whether the URL was revoked. The usual cause is a Content Security
+  /// Policy whose `connect-src` does not allow `blob:`, which that message
+  /// gives no hint of.
+  static Future<Uint8List> _readImageBytesOnWeb(ScannerImage image) async {
+    try {
+      return await image.readAsBytes();
+    } on MobileScannerBarcodeException {
+      rethrow;
+    } catch (error, stackTrace) {
+      Error.throwWithStackTrace(
+        MobileScannerBarcodeException(
+          'Could not read the picked image ($error). If the page has a Content '
+          'Security Policy, make sure it allows blob: in connect-src.',
+        ),
+        stackTrace,
+      );
+    }
+  }
+
+  /// Runs [analysis] once every analysis queued before it has completed,
+  /// successfully or not.
+  ///
+  /// `mobile_scanner`'s Android implementation keeps a single pending result
+  /// for `analyzeImage`. A second call that starts before the first completes
+  /// replaces it, and the first call's future then never completes — and an
+  /// image picked as bytes never has its temporary file deleted, because the
+  /// deletion waits for that future. iOS and macOS handle overlapping calls,
+  /// and an analysis takes a fraction of a second, so every native analysis
+  /// goes through here rather than special-casing Android.
+  ///
+  /// The whole analysis is queued, temporary file included, so files are only
+  /// written for the analysis that is about to run.
+  ///
+  /// The queue is per controller, so it only serialises analyses started
+  /// through this instance.
+  ///
+  /// The queue advances on a [Completer] of its own rather than on a listener
+  /// attached to the returned future. A listener there would count as handling
+  /// its error, so a failing analysis the caller never awaits would vanish
+  /// silently instead of reaching the zone's uncaught-error handler, as a
+  /// direct `MobileScannerController.analyzeImage` call's error does. The
+  /// completer's future only ever completes with a value, and `whenComplete`
+  /// passes the analysis's own result or error through untouched — including
+  /// a synchronous throw from [analysis], which `then` has already turned into
+  /// an error by then.
+  Future<T> _queueImageAnalysis<T>(Future<T> Function() analysis) {
+    final previous = _imageAnalysisQueue;
+    final done = Completer<void>();
+    _imageAnalysisQueue = done.future;
+    return previous.then((_) => analysis()).whenComplete(done.complete);
+  }
+
+  void _throwIfCannotAnalyzeImages() {
     if (!ScannerPlatformSupport.current.analyzeImage) {
       throw UnsupportedError(
         'Analyzing images is not supported on '
         '${ScannerPlatformSupport.currentPlatformName}.',
       );
     }
-    return _controller.analyzeImage(path, formats: formats);
+  }
+
+  /// Analyses the image behind [url] in the browser.
+  ///
+  /// `mobile_scanner` 7.4 throws [UnsupportedError] from `analyzeImage` on the
+  /// web. It is still called first rather than skipped, so that a release
+  /// that implements it is picked up without a change here. Only that exact
+  /// error falls back to the built-in decoder: any other error comes from a
+  /// real implementation, and propagates.
+  Future<BarcodeCapture?> _analyzeImageUrlOnWeb(
+    String url,
+    List<BarcodeFormat> formats,
+  ) async {
+    try {
+      return await _controller.analyzeImage(url, formats: formats);
+    } on UnsupportedError {
+      // Fall through to the built-in decoder.
+    }
+    return decodeBarcodesFromImageBytes(
+      await readImageUrlBytes(url),
+      formats: formats,
+    );
   }
 
   @override

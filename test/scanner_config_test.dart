@@ -49,6 +49,106 @@ void main() {
       expect(theme.reticleErrorColor, scheme.error);
     });
 
+    test('fromColorScheme derives exactly what it did in 8.0', () {
+      // fromColorScheme now delegates to fromColors; pin the mapping so that
+      // refactor cannot shift a colour for existing apps.
+      final scheme = ColorScheme.fromSeed(
+        seedColor: const Color(0xFF00897B),
+        brightness: Brightness.dark,
+      );
+
+      expect(
+        ScannerTheme.fromColorScheme(scheme),
+        ScannerTheme(
+          reticleColor: scheme.primary,
+          reticleSuccessColor: scheme.primary,
+          reticleErrorColor: scheme.error,
+          scanLineColor: scheme.primary,
+          controlBackgroundColor: scheme.surface.withValues(alpha: 0.85),
+          controlForegroundColor: scheme.onSurface,
+          controlActiveBackgroundColor: scheme.primary,
+          controlActiveForegroundColor: scheme.onPrimary,
+          barcodeHighlightColor: scheme.primary,
+          focusRingColor: scheme.primary,
+          surfaceColor: scheme.surface,
+          onSurfaceColor: scheme.onSurface,
+        ),
+      );
+    });
+
+    test('fromColors matches fromColorScheme given the same colours', () {
+      // The point of fromColors: an app on package:material_ui, whose
+      // ColorScheme is a different type, gets the identical theme.
+      final scheme = ColorScheme.fromSeed(seedColor: const Color(0xFFE91E63));
+
+      expect(
+        ScannerTheme.fromColors(
+          primary: scheme.primary,
+          onPrimary: scheme.onPrimary,
+          surface: scheme.surface,
+          onSurface: scheme.onSurface,
+          error: scheme.error,
+        ),
+        ScannerTheme.fromColorScheme(scheme),
+      );
+    });
+
+    test('fromColors needs only a primary colour', () {
+      final theme = ScannerTheme.fromColors(primary: const Color(0xFF1565C0));
+      final resolved = theme.resolve();
+
+      expect(theme.reticleColor, const Color(0xFF1565C0));
+      expect(theme.controlActiveBackgroundColor, const Color(0xFF1565C0));
+      // Unset surface and error keep the camera-friendly defaults.
+      expect(resolved.surfaceColor, ScannerTheme.fallback.surfaceColor);
+      expect(resolved.onSurfaceColor, ScannerTheme.fallback.onSurfaceColor);
+      expect(
+        resolved.controlBackgroundColor,
+        ScannerTheme.fallback.controlBackgroundColor,
+      );
+      expect(
+        resolved.reticleErrorColor,
+        ScannerTheme.fallback.reticleErrorColor,
+      );
+    });
+
+    test('fromColors picks legible foregrounds when they are omitted', () {
+      final onDark = ScannerTheme.fromColors(
+        primary: const Color(0xFF0D47A1),
+        surface: const Color(0xFF101010),
+      );
+      expect(onDark.controlActiveForegroundColor, const Color(0xFFFFFFFF));
+      expect(onDark.onSurfaceColor, const Color(0xFFFFFFFF));
+      expect(onDark.controlForegroundColor, const Color(0xFFFFFFFF));
+
+      final onLight = ScannerTheme.fromColors(
+        primary: const Color(0xFFFFEB3B),
+        surface: const Color(0xFFFAFAFA),
+      );
+      expect(onLight.controlActiveForegroundColor, const Color(0xFF1C1C1E));
+      expect(onLight.onSurfaceColor, const Color(0xFF1C1C1E));
+
+      // The choice agrees with Material's own estimate for the same colours.
+      expect(
+        ThemeData.estimateBrightnessForColor(const Color(0xFF0D47A1)),
+        Brightness.dark,
+      );
+      expect(
+        ThemeData.estimateBrightnessForColor(const Color(0xFFFFEB3B)),
+        Brightness.light,
+      );
+
+      // Explicit foregrounds always win.
+      final explicit = ScannerTheme.fromColors(
+        primary: const Color(0xFFFFEB3B),
+        onPrimary: const Color(0xFF00FF00),
+        surface: const Color(0xFFFAFAFA),
+        onSurface: const Color(0xFFFF00FF),
+      );
+      expect(explicit.controlActiveForegroundColor, const Color(0xFF00FF00));
+      expect(explicit.onSurfaceColor, const Color(0xFFFF00FF));
+    });
+
     test(
       'equality is by value, so the scope only notifies on real changes',
       () {
@@ -103,6 +203,19 @@ void main() {
       expect(copy.galleryButton, 'Pick');
       expect(copy.scanHint, 'Aim');
       expect(copy.doneButton, const ScannerLabels().doneButton);
+    });
+
+    test('dismissSheetLabel has an English default and can be replaced', () {
+      const labels = ScannerLabels();
+      expect(labels.dismissSheetLabel, 'Dismiss');
+      expect(
+        labels.copyWith(dismissSheetLabel: 'Schließen').dismissSheetLabel,
+        'Schließen',
+      );
+      expect(
+        labels.copyWith(scanHint: 'Aim').dismissSheetLabel,
+        labels.dismissSheetLabel,
+      );
     });
 
     test('field and type labels fall back to the English default', () {

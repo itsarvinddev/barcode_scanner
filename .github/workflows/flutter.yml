@@ -37,6 +37,33 @@ jobs:
           path: coverage/lcov.info
           if-no-files-found: ignore
 
+  test-web:
+    # The still-image decoder behind gallery scanning on the web is JS interop
+    # against zxing-wasm and the browser's image decoding; the VM run above
+    # skips it. Both web compilers are exercised because their interop differs
+    # (exceptions, number conversions). ubuntu-latest ships Google Chrome, and
+    # the tests fetch zxing-wasm from jsDelivr as a real page would.
+    #
+    # `--wasm` tests render through skwasm, which needs WebGL. When Chrome
+    # cannot provide it the Flutter loader finds no compatible build and the
+    # runner waits at "loading" forever instead of failing (and releases before
+    # flutter/flutter#182618 always launched Chrome that way), hence the
+    # timeout.
+    name: Test web image decoder (Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Test (dart2js)
+        run: flutter test --platform chrome test/web
+      - name: Test (dart2wasm)
+        run: flutter test --platform chrome --wasm test/web
+
   pana:
     name: pub.dev score
     runs-on: ubuntu-latest
