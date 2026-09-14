@@ -32,6 +32,12 @@ import 'utils/scanner_image.dart';
 /// along with [onGalleryImagePick] and [onGalleryScanError], behave exactly as
 /// the same-named [AiBarcodeScanner] parameters.
 ///
+/// On the web, [webBarcodeReader] and [webBarcodeLibraryScriptUrl] choose the
+/// detection backend and a self-hosted copy of its library, as the same-named
+/// [AiBarcodeScanner] parameters do — including for the gallery button's
+/// built-in decoder — so a page with a strict Content Security Policy can keep
+/// using this function. Both are ignored on other platforms.
+///
 /// For anything more involved — batch collection, staying open after a scan,
 /// custom chrome — use [AiBarcodeScanner] directly.
 Future<BarcodeCapture?> showAiBarcodeScanner(
@@ -61,6 +67,8 @@ Future<BarcodeCapture?> showAiBarcodeScanner(
   )?
   galleryImageAnalyzer,
   void Function(Object error, StackTrace stackTrace)? onGalleryScanError,
+  WebBarcodeReader? webBarcodeReader,
+  String? webBarcodeLibraryScriptUrl,
   bool showScanHint = true,
   List<DeviceOrientation>? preferredOrientations,
   VoidCallback? onOpenSettings,
@@ -93,6 +101,8 @@ Future<BarcodeCapture?> showAiBarcodeScanner(
             onGalleryImagePick: onGalleryImagePick,
             galleryImageAnalyzer: galleryImageAnalyzer,
             onGalleryScanError: onGalleryScanError,
+            webBarcodeReader: webBarcodeReader,
+            webBarcodeLibraryScriptUrl: webBarcodeLibraryScriptUrl,
             showScanHint: showScanHint,
             preferredOrientations: preferredOrientations,
             onOpenSettings: onOpenSettings,
@@ -113,6 +123,10 @@ Future<BarcodeCapture?> showAiBarcodeScanner(
 /// ```dart
 /// final items = await showAiBarcodeScannerBatch(context, maxScans: 20);
 /// ```
+///
+/// On the web, [webBarcodeReader] and [webBarcodeLibraryScriptUrl] choose the
+/// detection backend and a self-hosted copy of its library, as the same-named
+/// [AiBarcodeScanner] parameters do. Both are ignored on other platforms.
 Future<List<Barcode>> showAiBarcodeScannerBatch(
   BuildContext context, {
   int? maxScans,
@@ -129,6 +143,8 @@ Future<List<Barcode>> showAiBarcodeScannerBatch(
     ScannerAction.torch,
     ScannerAction.close,
   },
+  WebBarcodeReader? webBarcodeReader,
+  String? webBarcodeLibraryScriptUrl,
   bool showScanHint = true,
   List<DeviceOrientation>? preferredOrientations,
   VoidCallback? onOpenSettings,
@@ -157,6 +173,8 @@ Future<List<Barcode>> showAiBarcodeScannerBatch(
             feedback: feedback,
             enabledActionButtons: enabledActionButtons,
             galleryButtonType: GalleryButtonType.none,
+            webBarcodeReader: webBarcodeReader,
+            webBarcodeLibraryScriptUrl: webBarcodeLibraryScriptUrl,
             showScanHint: showScanHint,
             preferredOrientations: preferredOrientations,
             onOpenSettings: onOpenSettings,

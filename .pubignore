@@ -28,13 +28,20 @@ build/
 .flutter-plugins-dependencies
 
 # --- publishing only ---
-# Screenshots live in the repo for the README, but only the two declared under
-# `screenshots:` in pubspec.yaml need to ship in the archive.
-assets/IMG_5358.png
-assets/IMG_5360.png
-assets/IMG_5362.png
-assets/IMG_5363.png
-assets/IMG_5364.png
+# README imagery is loaded from raw.githubusercontent.com, so it does not need
+# to ship. Only the pub.dev carousel (assets/readme/pubdev_*.webp, declared
+# under `screenshots:` in pubspec.yaml) has to be in the archive.
+assets/readme/hero.webp
+assets/readme/demo.webp
+assets/readme/screen_*.webp
+
+# Still embedded (from GitHub master) by the 8.0.1 and 8.1.0 READMEs on
+# pub.dev, so it stays in the repository, but it does not need to ship.
+assets/ai_barcode_scanner.png
+
+# The generator for that imagery: a private Flutter package plus a Node
+# project (with node_modules), never part of the published package.
+tool/
 
 # Machine-specific and generated files from the example app.
 # The example's lockfile records whatever SDK resolved it, which would

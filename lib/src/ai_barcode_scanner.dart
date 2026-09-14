@@ -270,7 +270,10 @@ class AiBarcodeScanner extends StatefulWidget {
   /// Decides whether a detection should be accepted.
   ///
   /// Return `false` to reject it: the overlay flashes the error colour, the
-  /// rejection haptic fires, and [onDetect] is not called.
+  /// rejection haptic fires, [ScannerLabels.invalidBarcode] replaces the scan
+  /// hint for a moment when [showScanHint] is on, and [onDetect] is not
+  /// called. The feedback repeats at most once per [scanCooldown], however
+  /// long a rejected code stays in frame.
   final bool Function(BarcodeCapture capture)? validator;
 
   /// Called when the scanner itself reports a detection error.
@@ -316,7 +319,8 @@ class AiBarcodeScanner extends StatefulWidget {
   /// Which lens to start with, on devices that expose more than one.
   final CameraLensType lensType;
 
-  /// Desired camera resolution. Android only.
+  /// Desired camera resolution. Android, and the web (as an ideal camera
+  /// constraint the browser may not honour).
   final Size? cameraResolution;
 
   /// Whether the torch should be on when the camera starts.
@@ -424,6 +428,14 @@ class AiBarcodeScanner extends StatefulWidget {
   final Duration idleHintDelay;
 
   /// Whether to show guidance copy under the scan window.
+  ///
+  /// The same pill also carries short-lived feedback, which replaces the
+  /// guidance for a couple of seconds and is announced to screen readers:
+  /// [ScannerLabels.invalidBarcode] when [validator] rejects a scan,
+  /// [ScannerLabels.noBarcodeFoundInImage] when a picked image holds no
+  /// barcode, and [ScannerLabels.galleryUnsupported] when picking or analysing
+  /// an image throws an [UnsupportedError]. With this off, none of them is
+  /// shown; the overlay flash and haptics still are.
   final bool showScanHint;
 
   // ---------------------------------------------------------------------------
@@ -659,9 +671,12 @@ class AiBarcodeScanner extends StatefulWidget {
   /// It receives the image and the formats the scanner is restricted to
   /// (empty meaning every format), read from the live controller so a
   /// supplied [controller]'s formats are honoured. Return `null` or an empty
-  /// capture when nothing was found. A thrown error is reported through
-  /// [onGalleryScanError], with the same rejection feedback as a failed
-  /// built-in scan.
+  /// capture when nothing was found, which shows
+  /// [ScannerLabels.noBarcodeFoundInImage] when [showScanHint] is on. A thrown
+  /// error is reported through [onGalleryScanError], with the same rejection
+  /// feedback as a failed built-in scan; throw an [UnsupportedError] to have
+  /// the scanner also show [ScannerLabels.galleryUnsupported] (again when
+  /// [showScanHint] is on).
   ///
   /// With an analyzer the gallery button is offered on every platform with
   /// camera support, even one where
@@ -672,9 +687,12 @@ class AiBarcodeScanner extends StatefulWidget {
   )?
   galleryImageAnalyzer;
 
-  /// Called when analysing a picked image fails.
+  /// Called when picking or analysing an image from the gallery fails.
   ///
-  /// Without this, a failed gallery scan is reported only through the overlay.
+  /// Without this, errors go to [FlutterError.reportError]. Either way the
+  /// overlay flashes and the rejection haptic fires. Only an
+  /// [UnsupportedError] (an [UnimplementedError] included) also shows a
+  /// message, [ScannerLabels.galleryUnsupported] (when [showScanHint] is on).
   final void Function(Object error, StackTrace stackTrace)? onGalleryScanError;
 
   /// Called from [State.dispose].
@@ -716,9 +734,24 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
   final ValueNotifier<bool> _showIdleHint = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _hasMultipleLenses = ValueNotifier<bool>(false);
 
+  /// Picks the short-lived message that takes over the scan hint, such as
+  /// [ScannerLabels.invalidBarcode]; `null` while the usual guidance shows.
+  ///
+  /// Holds the choice of label rather than its text, so a message that is up
+  /// when the labels change (a locale switch) is shown in the new language.
+  final ValueNotifier<String Function(ScannerLabels labels)?> _transientHint =
+      ValueNotifier<String Function(ScannerLabels labels)?>(null);
+
   Timer? _resultFlashTimer;
   Timer? _focusRingTimer;
   Timer? _idleHintTimer;
+  Timer? _transientHintTimer;
+
+  /// The shortest time a transient hint stays up: long enough to read a short
+  /// sentence, which the overlay flash alone is not.
+  static const Duration _minTransientHintDuration = Duration(
+    milliseconds: 2500,
+  );
 
   DateTime? _lastAcceptedAt;
   DateTime? _lastRejectedAt;
@@ -844,6 +877,12 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
       _lastFacing = null;
       _hasMultipleLenses.value = false;
     }
+
+    // A message hidden along with the hint must not come back, and be read
+    // out again, if the hint is turned back on before its time is up.
+    if (oldWidget.showScanHint && !widget.showScanHint) {
+      _clearTransientHint();
+    }
   }
 
   @override
@@ -851,6 +890,7 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
     _resultFlashTimer?.cancel();
     _focusRingTimer?.cancel();
     _idleHintTimer?.cancel();
+    _transientHintTimer?.cancel();
 
     if (widget.useAppLifecycleState) {
       WidgetsBinding.instance.removeObserver(this);
@@ -866,6 +906,7 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
     _isPickingImage.dispose();
     _showIdleHint.dispose();
     _hasMultipleLenses.dispose();
+    _transientHint.dispose();
 
     // Only touch the orientation policy if this widget changed it, so the host
     // app's own lock survives.
@@ -946,11 +987,43 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
   }
 
   void _flashResult({required bool success}) {
+    // An accepted scan replaces whatever went wrong before it, so "not
+    // accepted" never lingers over a success.
+    if (success) _clearTransientHint();
     _isSuccess.value = success;
     _resultFlashTimer?.cancel();
     _resultFlashTimer = Timer(widget.resultFlashDuration, () {
       if (mounted) _isSuccess.value = null;
     });
+  }
+
+  /// Shows the label [message] picks in place of the scan hint for a moment,
+  /// then lets the usual guidance — batch, idle or default — come back.
+  ///
+  /// Nothing is shown when [AiBarcodeScanner.showScanHint] is off: an embedded
+  /// scanner, or an app that turned the hint off, gets no new UI. Nor is
+  /// anything shown for a label set to an empty string, which is how an app
+  /// turns one message off; the guidance stays in place.
+  void _showTransientHint(String Function(ScannerLabels labels) message) {
+    if (!mounted || !widget.showScanHint || message(widget.labels).isEmpty) {
+      return;
+    }
+    _transientHint.value = message;
+    _transientHintTimer?.cancel();
+    // Never shorter than the flash it explains.
+    final duration =
+        widget.resultFlashDuration > _minTransientHintDuration
+            ? widget.resultFlashDuration
+            : _minTransientHintDuration;
+    _transientHintTimer = Timer(duration, () {
+      if (mounted) _transientHint.value = null;
+    });
+  }
+
+  void _clearTransientHint() {
+    _transientHintTimer?.cancel();
+    _transientHintTimer = null;
+    _transientHint.value = null;
   }
 
   // ---------------------------------------------------------------------------
@@ -987,6 +1060,7 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
         _lastRejectedAt = rejectedAt;
         _flashResult(success: false);
         unawaited(widget.feedback.play(ScannerFeedbackEvent.reject));
+        _showTransientHint((labels) => labels.invalidBarcode);
       }
       return;
     }
@@ -1079,6 +1153,7 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
       if (capture == null || capture.barcodes.isEmpty) {
         _flashResult(success: false);
         unawaited(widget.feedback.play(ScannerFeedbackEvent.reject));
+        _showTransientHint((labels) => labels.noBarcodeFoundInImage);
         return;
       }
 
@@ -1087,6 +1162,16 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
       if (!mounted) return;
       _flashResult(success: false);
       unawaited(widget.feedback.play(ScannerFeedbackEvent.reject));
+      // Only this failure has a message of its own. A picker, platform
+      // implementation or analyzer without still-image support throws it
+      // (UnimplementedError, a stub's usual error, included), whether it
+      // fails picking or analysing. Anything else — an unreadable file, a
+      // decoder the page could not load — is neither "no barcode" nor
+      // "unsupported", and saying either would mislead; it goes to the
+      // callback below.
+      if (error is UnsupportedError) {
+        _showTransientHint((labels) => labels.galleryUnsupported);
+      }
       // Previously this escaped as an unhandled async error and the user got
       // no feedback at all.
       if (widget.onGalleryScanError != null) {
@@ -1628,22 +1713,7 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
                     )
                     : null;
 
-            final hint =
-                widget.showScanHint
-                    ? ValueListenableBuilder<bool>(
-                      valueListenable: _showIdleHint,
-                      builder:
-                          (context, idle, _) => ScanHint(
-                            text:
-                                widget.scanMode == ScanMode.batch
-                                    ? widget.labels.scanHintBatch
-                                    : (idle
-                                        ? widget.labels.scanHintIdle
-                                        : widget.labels.scanHint),
-                            theme: theme,
-                          ),
-                    )
-                    : null;
+            final hint = widget.showScanHint ? _buildScanHint(theme) : null;
 
             final bottomCluster = <Widget>[
               if (hint != null) hint,
@@ -1708,6 +1778,38 @@ class _AiBarcodeScannerState extends State<AiBarcodeScanner>
                     child: Center(child: zoomSlider),
                   ),
               ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// The guidance pill under the scan window.
+  ///
+  /// A transient message — a rejected scan, an image with no barcode — takes
+  /// it over while it lasts, and is announced to screen readers. The usual
+  /// guidance resumes when it clears, idle state included.
+  Widget _buildScanHint(ScannerTheme theme) {
+    return ValueListenableBuilder<String Function(ScannerLabels labels)?>(
+      valueListenable: _transientHint,
+      builder: (context, pickMessage, _) {
+        final message = pickMessage?.call(widget.labels);
+        // A label emptied while its message is up gives the guidance back.
+        final transient = message == null || message.isEmpty ? null : message;
+        return ValueListenableBuilder<bool>(
+          valueListenable: _showIdleHint,
+          builder: (context, idle, _) {
+            final guidance =
+                widget.scanMode == ScanMode.batch
+                    ? widget.labels.scanHintBatch
+                    : (idle
+                        ? widget.labels.scanHintIdle
+                        : widget.labels.scanHint);
+            return ScanHint(
+              text: transient ?? guidance,
+              announce: transient != null,
+              theme: theme,
             );
           },
         );

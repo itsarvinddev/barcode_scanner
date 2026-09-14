@@ -362,7 +362,8 @@ old glyphs — and add `cupertino_icons` to your own `pubspec.yaml` if you do.
 ### 11. SDK floor
 
 `sdk: >=3.7.0 <4.0.0`, `flutter: >=3.29.0` — set by `mobile_scanner` 7.4.0.
-iOS 15.0 and macOS 12.0 are the minimum deployment targets, set by Flutter 3.29+.
+iOS 12.0 and macOS 10.14 are the minimum deployment targets, set by
+`mobile_scanner`; new Flutter 3.47 projects target iOS 15.0 and macOS 12.0.
 
 ---
 

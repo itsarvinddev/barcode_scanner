@@ -1,3 +1,70 @@
+## 8.2.0
+
+Clearer feedback when a scan is rejected, self-hosting the web decoder without
+giving up the one-line scanner, and a rewritten README. No API breaks; the SDK
+floor stays at Dart 3.7 / Flutter 3.29.
+
+### Fixed
+
+- **`ScannerLabels.invalidBarcode`, `noBarcodeFoundInImage` and
+  `galleryUnsupported` had no effect.** They were added in 8.0.0 but never
+  shown, so translating them changed nothing, and a rejected scan or an empty
+  image got only a red flash and a haptic. Each now replaces the scan hint for
+  a couple of seconds, in the same pill and colours, and is announced to screen
+  readers. `invalidBarcode` appears when `validator` rejects a capture from the
+  camera or a picked image, together with the rejection haptic and throttled by
+  `scanCooldown` like it; a scan that reaches `onDetect` clears it at once.
+  `noBarcodeFoundInImage` appears when a picked image yields `null` or an empty
+  capture, from the built-in decoder or `galleryImageAnalyzer`, but not for a
+  cancelled pick. `galleryUnsupported` appears when picking or analysing an
+  image throws `UnsupportedError` (`UnimplementedError` included), as a
+  `galleryImagePicker`, `galleryImageAnalyzer` or platform implementation
+  without still-image support may; the error still reaches
+  `onGalleryScanError` (or `FlutterError.reportError`) as before. Other gallery
+  errors, such as an unreadable file, show no message. Set a label to `''` to
+  turn that one message off.
+
+  The messages follow `showScanHint`: they appear only where the hint does, so
+  a scanner with `showScanHint: false`, and `AiBarcodeScanner.embedded`, whose
+  hint is off by default, look exactly as they did. Flashes, haptics,
+  callbacks and the idle hint are unchanged, and the usual guidance returns
+  when a message clears.
+
+### Added
+
+- **`webBarcodeReader` and `webBarcodeLibraryScriptUrl` on
+  `showAiBarcodeScanner` and `showAiBarcodeScannerBatch`**, forwarded to the
+  scanner as-is. A web app whose Content Security Policy rules out jsDelivr can
+  now self-host the detection library and keep the one-liner, instead of
+  pushing `AiBarcodeScanner` itself.
+- **`AiBarcodeScannerController.setWebImageDecoderScriptUrl`** — points the
+  built-in web image decoder at a self-hosted copy of zxing-wasm without a
+  scanner on the page, for apps that only scan images they already have with
+  `analyzeScannerImage` or `analyzeImage`. Until now such an app always loaded
+  zxing-wasm from jsDelivr, because only a mounted `AiBarcodeScanner` with
+  `webBarcodeLibraryScriptUrl` could change that. Like that parameter, the
+  setting is page-wide and the first URL wins; call it before the first scan,
+  such as in `main`. It does nothing outside the web, and does not change where
+  the camera loads its library from.
+- **`ScanHint.announce`** — an optional flag (default `false`) that marks the
+  message as a live region, so screen readers read it out when it appears.
+
+### Documentation
+
+- **Rewritten README** with a quick start up front, real screenshots of the
+  8.x UI rendered from the package's widgets (replacing an illustration and
+  photos of the pre-8.0 interface), and a **Build with AI assistants** section
+  with copy-paste prompts.
+- **`llms.txt`** — an integration brief for AI coding assistants, now shipped in
+  the package: exact signatures and defaults, platform setup, compile-checked
+  recipes, testing guidance and pitfalls.
+- Corrected the iOS and macOS minimums (iOS 12.0 / macOS 10.14, from
+  `mobile_scanner`; new Flutter 3.47 projects target iOS 15.0 / macOS 12.0), and
+  documented that a plain `AiBarcodeScanner` shows a close button only when
+  `ScannerAction.close` is enabled.
+- The pubspec description no longer says the scanner is based on ML Kit, which
+  is not true on the web.
+
 ## 8.1.0
 
 Scanning from the gallery now works on the web, and the scanner works inside

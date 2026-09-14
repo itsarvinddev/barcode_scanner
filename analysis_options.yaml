@@ -4,6 +4,9 @@ analyzer:
   exclude:
     - build/**
     - example/**
+    # tool/readme_media is its own package with its own analysis_options.yaml,
+    # resolved only when the README imagery is regenerated.
+    - tool/**
   language:
     strict-casts: true
     strict-inference: true

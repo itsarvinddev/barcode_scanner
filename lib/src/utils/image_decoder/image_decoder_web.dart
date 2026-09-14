@@ -99,7 +99,8 @@ void debugResetImageDecoder() {
 }
 
 /// The zxing-wasm reader URL the app configured through
-/// `AiBarcodeScanner.webBarcodeLibraryScriptUrl`, if any.
+/// `AiBarcodeScanner.webBarcodeLibraryScriptUrl` or
+/// `AiBarcodeScannerController.setWebImageDecoderScriptUrl`, if any.
 String? _appScriptUrl;
 
 /// Loads zxing-wasm from [scriptUrl] instead of jsDelivr, from now on.
@@ -109,6 +110,8 @@ String? _appScriptUrl;
 /// library because its page cannot load it from the CDN, and that applies to
 /// scanning a picked image just as much as to the camera. Loading the same
 /// copy also keeps the camera and the decoder on one build of zxing-wasm.
+/// `AiBarcodeScannerController.setWebImageDecoderScriptUrl` exposes it for
+/// apps that scan images without a scanner on the page.
 ///
 /// As with `MobileScannerPlatform.setBarcodeLibraryScriptUrl`, the setting is
 /// for the whole page and the first URL wins. An explicit `scriptUrl` passed

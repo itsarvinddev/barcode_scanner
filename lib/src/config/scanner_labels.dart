@@ -133,13 +133,43 @@ class ScannerLabels {
   /// Shown over the placeholder while the camera is initialising.
   final String startingCamera;
 
-  /// Shown when a picked image contained no readable barcode.
+  /// Shown in the scan hint for a couple of seconds when an image picked with
+  /// the gallery button contains no barcode: the decoder, or
+  /// `AiBarcodeScanner.galleryImageAnalyzer`, returned `null` or an empty
+  /// capture.
+  ///
+  /// Not shown for a cancelled pick, nor for an image that could not be read
+  /// at all; that error goes to `AiBarcodeScanner.onGalleryScanError` without
+  /// a message. Like every transient hint message, it needs
+  /// `AiBarcodeScanner.showScanHint`, which the embedded scanner turns off by
+  /// default. Set it to an empty string to turn this message off and keep the
+  /// usual guidance up.
   final String noBarcodeFoundInImage;
 
-  /// Shown when image analysis is not available on this platform.
+  /// Shown in the scan hint for a couple of seconds when picking or analysing
+  /// an image from the gallery throws an [UnsupportedError] ([UnimplementedError]
+  /// included).
+  ///
+  /// The gallery button only appears while the camera runs, and only where
+  /// images can be analysed or a `galleryImageAnalyzer` is given, so this
+  /// comes from a `galleryImagePicker`, `galleryImageAnalyzer` or platform
+  /// implementation without still-image support. The error still reaches
+  /// `AiBarcodeScanner.onGalleryScanError`. Other failures — an unreadable
+  /// file, or on the web a decoder the page could not load — show no message.
+  /// Needs `AiBarcodeScanner.showScanHint`; an empty string turns it off.
   final String galleryUnsupported;
 
-  /// Shown when a scanned barcode fails the caller's validator.
+  /// Shown in the scan hint for a couple of seconds when
+  /// `AiBarcodeScanner.validator` rejects a barcode, from the camera or from
+  /// a picked image.
+  ///
+  /// It appears together with the rejection flash and haptic, and like them at
+  /// most once per `AiBarcodeScanner.scanCooldown`. If that feedback fires
+  /// again while the message is still up, the message stays and its time
+  /// starts again rather than it being repeated. A scan
+  /// that reaches `AiBarcodeScanner.onDetect`, with its success flash, clears
+  /// it at once. Needs `AiBarcodeScanner.showScanHint`; an empty string turns
+  /// it off.
   final String invalidBarcode;
 
   /// Label of the "copy value" action on a result.

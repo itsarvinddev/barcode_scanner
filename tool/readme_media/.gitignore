@@ -1,0 +1,12 @@
+# Flutter / Dart tooling. pubspec.lock is committed, as for the example app,
+# so a regeneration resolves the same packages.
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Rendered screens, animation frames and framed pages (build/screens,
+# build/framed, build/compose). Final images go to ../../assets/readme/.
+build/
+
+# Node
+compose/node_modules/

@@ -1,0 +1,14 @@
+{
+  "name": "readme-media-compose",
+  "private": true,
+  "type": "module",
+  "description": "Frames the scanner screens rendered by ../test/render_test.dart into README and pub.dev imagery.",
+  "scripts": {
+    "scenes": "node scenes.mjs",
+    "compose": "node compose.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.62.0",
+    "zxing-wasm": "3.1.3"
+  }
+}

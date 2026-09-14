@@ -11,6 +11,9 @@ const bool kHasWebImageDecoder = false;
 
 /// Loads the web decoder's library from [scriptUrl].
 ///
+/// Behind `AiBarcodeScannerController.setWebImageDecoderScriptUrl`, which
+/// apps may call unconditionally.
+///
 /// Does nothing outside the web, where there is no library to load. See the
 /// web implementation for the contract.
 void useImageDecoderScriptUrl(String scriptUrl) {}

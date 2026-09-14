@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- The README banner: 880x440 CSS px, captured at 2x. -->
+<link rel="stylesheet" href="phone.css">
+<style>
+  html, body { margin: 0; background: transparent; }
+  #canvas {
+    position: relative;
+    width: 880px; height: 440px;
+    border-radius: 26px;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse 380px 300px at 68% 58%, rgba(50, 215, 75, 0.16), rgba(50, 215, 75, 0) 70%),
+      radial-gradient(ellipse 420px 320px at 8% 0%, rgba(10, 132, 255, 0.16), rgba(10, 132, 255, 0) 70%),
+      linear-gradient(135deg, #0d1016 0%, #121823 55%, #0c0f14 100%);
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #fff;
+  }
+  /* A faint dot grid that fades out towards the phones. */
+  #canvas::before {
+    content: ""; position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1.2px);
+    background-size: 18px 18px;
+    -webkit-mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.5) 45%, transparent 70%);
+  }
+  /* Hairline edge, so the card holds its shape on a dark page too. */
+  #canvas::after {
+    content: ""; position: absolute; inset: 0; border-radius: 26px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+    pointer-events: none;
+  }
+
+  .copy { position: absolute; left: 50px; top: 0; bottom: 0; width: 320px; display: flex; flex-direction: column; justify-content: center; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
+    font-size: 11.5px; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase; color: #8ce99a;
+  }
+  .eyebrow i { width: 7px; height: 7px; border-radius: 50%; background: #32d74b; box-shadow: 0 0 8px rgba(50, 215, 75, 0.6); }
+  h1 { margin: 12px 0 0; font-size: 46px; line-height: 1.02; font-weight: 700; letter-spacing: -1.4px; }
+  .tagline { margin: 14px 0 0; font-size: 16px; line-height: 1.45; color: #a3adbb; max-width: 262px; }
+  .code {
+    margin-top: 22px; align-self: flex-start;
+    font: 500 12px/1 "SF Mono", Menlo, Consolas, monospace; color: #d6dde6;
+    padding: 10px 14px; border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  }
+  .code .k { color: #ff8fa3; } .code .f { color: #8ab4ff; }
+  .chips { margin-top: 18px; display: flex; gap: 8px; }
+  .chips span {
+    font-size: 12px; font-weight: 500; color: #c3cad4;
+    padding: 5px 10px; border-radius: 999px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  }
+
+  .phones { position: absolute; inset: 0; }
+  .phones .phone { position: absolute; }
+  .phones .back { filter: brightness(0.82) saturate(0.95); }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <div class="copy">
+    <div class="eyebrow"><i></i>Flutter package</div>
+    <h1>AI Barcode<br>Scanner</h1>
+    <p class="tagline">A complete, production-ready barcode &amp; QR scanner for Flutter.</p>
+    <div class="code"><span class="k">await</span> <span class="f">showAiBarcodeScanner</span>(context);</div>
+    <div class="chips"><span>Android</span><span>iOS</span><span>macOS</span><span>Web</span></div>
+  </div>
+  <div class="phones">
+    <div class="phone back" data-screen="result" data-scale="0.38" style="left: calc(394px / 0.38); top: calc(64px / 0.38);"></div>
+    <div class="phone back" data-screen="themed" data-scale="0.38" style="left: calc(672px / 0.38); top: calc(64px / 0.38);"></div>
+    <div class="phone" data-screen="scan" data-scale="0.44" style="left: calc(524px / 0.44); top: calc(28px / 0.44);"></div>
+  </div>
+</div>
+<script src="phone.js"></script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+/*
+ * A modern phone frame around a rendered screen.
+ *
+ * Every size is in the phone's own points (the screen is 393x852, the logical
+ * size the Flutter renderer uses), and the whole device is scaled with
+ * `zoom`, so it stays crisp at any size. Only the frame, status bar and home
+ * indicator are drawn here; the screen is the rendered PNG.
+ */
+
+.phone {
+  --bezel: 13px;
+  position: relative;
+  width: calc(393px + 2 * var(--bezel));
+  height: calc(852px + 2 * var(--bezel));
+  border-radius: 68px;
+  background: #0a0a0b;
+  box-shadow:
+    0 0 0 1.5px #3b3e44,
+    0 0 0 3.5px #7d828a,
+    0 0 0 4.5px #2a2c30,
+    0 40px 80px -20px rgba(0, 0, 0, 0.55),
+    0 18px 36px -12px rgba(0, 0, 0, 0.35);
+  flex: none;
+}
+
+/* No drop shadow: only the band. Used for the animated WebP, whose lossy
+   inter-frame encoding smears semi-transparent shadow pixels into dark blocks. */
+.phone.flat {
+  box-shadow:
+    0 0 0 1.5px #3b3e44,
+    0 0 0 3.5px #7d828a,
+    0 0 0 4.5px #2a2c30;
+}
+
+/* A shadow small enough to fade out inside the gallery canvas (screen.html),
+   which leaves ~18px beside and ~39px below the scaled phone. The default
+   shadow reaches ~42px and ~70px, and a transparent PNG cuts it off in a
+   visible rectangle on light backgrounds. */
+.phone.soft {
+  box-shadow:
+    0 0 0 1.5px #3b3e44,
+    0 0 0 3.5px #7d828a,
+    0 0 0 4.5px #2a2c30,
+    0 14px 22px -12px rgba(0, 0, 0, 0.45),
+    0 6px 12px -6px rgba(0, 0, 0, 0.25);
+}
+
+/* A faint highlight along the titanium band. */
+.phone::before {
+  content: "";
+  position: absolute;
+  inset: -3.5px;
+  border-radius: 71px;
+  pointer-events: none;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, 0) 70%, rgba(255, 255, 255, 0.18));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  padding: 2px;
+}
+
+.phone .btn {
+  position: absolute;
+  width: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #5d6168, #9aa0a8 60%, #4a4d52);
+}
+.phone .btn.action { left: -8px; top: 150px; height: 34px; }
+.phone .btn.vol-up { left: -8px; top: 222px; height: 62px; }
+.phone .btn.vol-down { left: -8px; top: 300px; height: 62px; }
+.phone .btn.power { right: -8px; top: 250px; height: 98px; }
+
+.phone .screen {
+  position: absolute;
+  inset: var(--bezel);
+  border-radius: 55px;
+  overflow: hidden;
+  background: #000;
+  isolation: isolate;
+}
+
+.phone .screen > img {
+  display: block;
+  width: 393px;
+  height: 852px;
+}
+
+.phone .island {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  width: 124px;
+  height: 36px;
+  margin-left: -62px;
+  border-radius: 18px;
+  background: #000;
+}
+
+.phone .status {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 32px 0 50px;
+  font: 600 17px/1 -apple-system, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  letter-spacing: -0.2px;
+  color: #fff;
+}
+.phone .status .icons { display: flex; align-items: center; gap: 6px; }
+.phone .status svg { display: block; fill: currentColor; }
+.phone.dark-status .status { color: #000; }
+
+.phone .home {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  width: 138px;
+  height: 5px;
+  margin-left: -69px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.92);
+}
+.phone.dark-status .home { background: rgba(0, 0, 0, 0.88); }

@@ -545,6 +545,41 @@ void main() {
       );
     });
 
+    testWidgets('a rejected scan shows and announces invalidBarcode', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _widgetsHost(
+          home: AiBarcodeScanner(
+            overlayConfig: _staticOverlay,
+            feedback: const ScannerFeedbackConfig.silent(),
+            validator: (_) => false,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      _expectNoMaterialInHost(tester);
+
+      platform.emitBarcode(
+        const BarcodeCapture(barcodes: <Barcode>[Barcode(rawValue: 'no')]),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text(_labels.invalidBarcode), findsOneWidget);
+      expect(
+        tester.getSemantics(find.text(_labels.invalidBarcode)),
+        isSemantics(label: _labels.invalidBarcode, isLiveRegion: true),
+      );
+
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.text(_labels.invalidBarcode), findsNothing);
+      expect(find.text(_labels.scanHint), findsOneWidget);
+      semantics.dispose();
+    });
+
     testWidgets('gaining Material localizations keeps the preview mounted', (
       tester,
     ) async {

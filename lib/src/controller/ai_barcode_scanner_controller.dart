@@ -95,6 +95,44 @@ class AiBarcodeScannerController extends ChangeNotifier {
   ) : _ownsController = false,
       _controller = controller;
 
+  /// Loads the web image decoder's zxing-wasm from [scriptUrl] instead of
+  /// jsDelivr, for the whole page. Does nothing outside the web.
+  ///
+  /// On the web, scanning a still image — the gallery button,
+  /// [analyzeScannerImage] or [analyzeImage] — uses a built-in zxing-wasm
+  /// decoder that is loaded on first use from `cdn.jsdelivr.net`. A page whose
+  /// Content Security Policy cannot allow that host serves its own copy of the
+  /// zxing-wasm 3.1.3 IIFE reader build (`dist/iife/reader/index.js`) and
+  /// points the decoder at it here:
+  ///
+  /// ```dart
+  /// void main() {
+  ///   // Served from the app's own origin: web/zxing-wasm/index.js.
+  ///   AiBarcodeScannerController.setWebImageDecoderScriptUrl(
+  ///     'zxing-wasm/index.js',
+  ///   );
+  ///   runApp(const MyApp());
+  /// }
+  /// ```
+  ///
+  /// This is what `AiBarcodeScanner.webBarcodeLibraryScriptUrl` does for picked
+  /// images, without a scanner on the page — for an app that only reads images
+  /// it already has. As with that parameter and with `mobile_scanner`'s
+  /// `MobileScannerPlatform.setBarcodeLibraryScriptUrl`, the setting is
+  /// page-wide and the first URL wins, whether it came from here or from a
+  /// scanner.
+  ///
+  /// Call it before the first image is scanned, such as in `main`. Once
+  /// zxing-wasm is on the page — loaded by an earlier scan, or by
+  /// `mobile_scanner` for the camera — that copy is reused and the URL has no
+  /// effect. zxing-wasm still downloads its WebAssembly binary from
+  /// `fastly.jsdelivr.net`, and this does not change where the *camera* loads
+  /// its detection library from; pass `webBarcodeLibraryScriptUrl` to the
+  /// scanner for that.
+  static void setWebImageDecoderScriptUrl(String scriptUrl) {
+    useImageDecoderScriptUrl(scriptUrl);
+  }
+
   final MobileScannerController _controller;
   final bool _ownsController;
 

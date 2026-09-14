@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- One framed phone on a transparent canvas, for the README gallery.
+     compose.mjs opens this as screen.html?screen=<name>&status=<light|dark>,
+     adding &shadow=0 for the animation (see animate() in compose.mjs). -->
+<link rel="stylesheet" href="phone.css">
+<style>
+  html, body { margin: 0; background: transparent; }
+  #canvas {
+    width: 330px; height: 666px;
+    display: grid; place-items: start center;
+  }
+  #canvas .phone { margin-top: 12px; }
+</style>
+</head>
+<body>
+<div id="canvas"><div class="phone" data-scale="0.7"></div></div>
+<script>
+  const params = new URLSearchParams(location.search);
+  const phone = document.querySelector('.phone');
+  phone.dataset.screen = params.get('screen');
+  phone.dataset.status = params.get('status') || 'light';
+  phone.classList.add(params.get('shadow') === '0' ? 'flat' : 'soft');
+</script>
+<script src="phone.js"></script>
+</body>
+</html>

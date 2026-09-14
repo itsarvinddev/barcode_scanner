@@ -182,8 +182,7 @@ class ScannerOverlayConfig {
   /// Whether to outline every detected barcode in the preview.
   ///
   /// Useful when several barcodes are visible at once and the user needs to
-  /// see which ones were picked up. Has no effect on the web, where the
-  /// detection backend does not report barcode geometry.
+  /// see which ones were picked up.
   final bool showBarcodeHighlights;
 
   /// How long the overlay takes to fade between its resting, success and error

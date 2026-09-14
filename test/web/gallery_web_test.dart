@@ -109,6 +109,31 @@ String _objectUrl(Uint8List bytes, String type) => web.URL.createObjectURL(
   web.Blob(<web.BlobPart>[bytes.toJS].toJS, web.BlobPropertyBag(type: type)),
 );
 
+/// A self-hosted copy of the zxing-wasm reader, served from the page's own
+/// origin as a `blob:` URL. Revoke it when done.
+Future<String> _readerMirror() async {
+  final response = await web.window.fetch(zxingWasmScriptUrl.toJS).toDart;
+  final script = (await response.text().toDart).toDart;
+  return web.URL.createObjectURL(
+    web.Blob(
+      <web.BlobPart>[script.toJS].toJS,
+      web.BlobPropertyBag(type: 'text/javascript'),
+    ),
+  );
+}
+
+/// The `<script>` tag the built-in decoder injects.
+const _decoderScriptSelector = 'script#ai-barcode-scanner-zxing-wasm';
+
+/// Puts the page back to one that has not loaded zxing-wasm, and has no
+/// decoder script URL configured, until the test ends.
+void _coldDecoderPage() {
+  debugResetImageDecoder();
+  addTearDown(debugResetImageDecoder);
+  web.document.querySelector(_decoderScriptSelector)?.remove();
+  globalContext.setProperty('ZXingWASM'.toJS, null);
+}
+
 /// Taps the gallery button and lets real time pass — the decoder fetches and
 /// runs WebAssembly — until [done], pumping between slices so continuations
 /// queued in the test's fake zone run.
@@ -263,6 +288,81 @@ void main() {
     );
   });
 
+  group('AiBarcodeScannerController.setWebImageDecoderScriptUrl', () {
+    late AiBarcodeScannerController controller;
+
+    setUp(() {
+      MobileScannerPlatform.instance = MobileScannerWeb();
+      controller = AiBarcodeScannerController(autoStart: false);
+    });
+
+    tearDown(() => controller.dispose());
+
+    test(
+      'makes a standalone analyzeScannerImage load the self-hosted reader',
+      () async {
+        final mirror = await _readerMirror();
+        addTearDown(() => web.URL.revokeObjectURL(mirror));
+        _coldDecoderPage();
+
+        // No scanner widget anywhere: the app only reads images it has.
+        AiBarcodeScannerController.setWebImageDecoderScriptUrl(mirror);
+        final capture = await controller.analyzeScannerImage(
+          ScannerImage.bytes(qrPng),
+        );
+
+        expect(capture!.barcodes.single.rawValue, qrText);
+        expect(
+          web.document
+              .querySelector(_decoderScriptSelector)
+              ?.getAttribute('src'),
+          mirror,
+        );
+      },
+      timeout: timeout,
+    );
+
+    test('keeps the first URL, like mobile_scanner', () async {
+      final mirror = await _readerMirror();
+      addTearDown(() => web.URL.revokeObjectURL(mirror));
+      _coldDecoderPage();
+
+      AiBarcodeScannerController.setWebImageDecoderScriptUrl(mirror);
+      // A later URL — here one that could never load — is ignored.
+      AiBarcodeScannerController.setWebImageDecoderScriptUrl(
+        'https://example.invalid/zxing-wasm.js',
+      );
+      final image = _objectUrl(qrPng, 'image/png');
+      addTearDown(() => web.URL.revokeObjectURL(image));
+      final capture = await controller.analyzeImage(image);
+
+      expect(capture!.barcodes.single.rawValue, qrText);
+      expect(
+        web.document.querySelector(_decoderScriptSelector)?.getAttribute('src'),
+        mirror,
+      );
+    }, timeout: timeout);
+
+    test('wins over a scanner mounted afterwards', () async {
+      final mirror = await _readerMirror();
+      addTearDown(() => web.URL.revokeObjectURL(mirror));
+      _coldDecoderPage();
+
+      AiBarcodeScannerController.setWebImageDecoderScriptUrl(mirror);
+      // What a scanner's initState does with its webBarcodeLibraryScriptUrl.
+      useImageDecoderScriptUrl('https://example.invalid/zxing-wasm.js');
+      final capture = await controller.analyzeScannerImage(
+        ScannerImage.bytes(ean13Png),
+      );
+
+      expect(capture!.barcodes.single.rawValue, ean13Text);
+      expect(
+        web.document.querySelector(_decoderScriptSelector)?.getAttribute('src'),
+        mirror,
+      );
+    }, timeout: timeout);
+  });
+
   group('AiBarcodeScanner', () {
     setUp(() => MobileScannerPlatform.instance = _FakeWebPlatform());
 
@@ -305,26 +405,9 @@ void main() {
     testWidgets(
       'loads the decoder from webBarcodeLibraryScriptUrl, not jsDelivr',
       (tester) async {
-        // A self-hosted copy of the reader, served from the page's own origin.
-        final mirror = await tester.runAsync(() async {
-          final response =
-              await web.window.fetch(zxingWasmScriptUrl.toJS).toDart;
-          final script = (await response.text().toDart).toDart;
-          return web.URL.createObjectURL(
-            web.Blob(
-              <web.BlobPart>[script.toJS].toJS,
-              web.BlobPropertyBag(type: 'text/javascript'),
-            ),
-          );
-        });
+        final mirror = await tester.runAsync(_readerMirror);
         addTearDown(() => web.URL.revokeObjectURL(mirror!));
-
-        // A page that has not loaded zxing-wasm yet.
-        debugResetImageDecoder();
-        addTearDown(debugResetImageDecoder);
-        const scriptSelector = 'script#ai-barcode-scanner-zxing-wasm';
-        web.document.querySelector(scriptSelector)?.remove();
-        globalContext.setProperty('ZXingWASM'.toJS, null);
+        _coldDecoderPage();
 
         BarcodeCapture? detected;
         Object? error;
@@ -349,7 +432,9 @@ void main() {
         expect(error, isNull);
         expect(detected!.barcodes.single.rawValue, qrText);
         expect(
-          web.document.querySelector(scriptSelector)?.getAttribute('src'),
+          web.document
+              .querySelector(_decoderScriptSelector)
+              ?.getAttribute('src'),
           mirror,
         );
       },

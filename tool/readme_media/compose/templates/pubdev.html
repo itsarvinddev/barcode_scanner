@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- A pub.dev screenshot: caption and one framed phone on a soft background,
+     540x675 CSS px captured at 2x. compose.mjs opens this as
+     pubdev.html?screen=<name>&status=<light|dark>&title=...&body=... -->
+<link rel="stylesheet" href="phone.css">
+<style>
+  html, body { margin: 0; background: transparent; }
+  #canvas {
+    --tint: 50, 215, 75;
+    position: relative; overflow: hidden;
+    width: 540px; height: 675px;
+    background:
+      radial-gradient(ellipse 340px 300px at 50% 78%, rgba(var(--tint), 0.22), rgba(var(--tint), 0) 70%),
+      linear-gradient(180deg, #f7f9fc 0%, #eaf0f6 100%);
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    text-align: center;
+  }
+  #canvas[data-tint="result"] { --tint: 10, 132, 255; }
+  #canvas[data-tint="themed"] { --tint: 139, 124, 255; }
+  #canvas[data-tint="embedded"] { --tint: 65, 95, 145; }
+  h1 { margin: 0; padding-top: 40px; font-size: 31px; line-height: 1.1; font-weight: 700; letter-spacing: -0.7px; color: #0f1729; }
+  p { margin: 10px auto 0; max-width: 400px; font-size: 16.5px; line-height: 1.4; color: #4b5767; }
+  .stage { position: absolute; left: 0; right: 0; bottom: 0; top: 132px; display: flex; justify-content: center; }
+  .stage .phone { margin-top: calc(6px / 0.58); }
+</style>
+</head>
+<body>
+<div id="canvas">
+  <h1></h1>
+  <p></p>
+  <div class="stage"><div class="phone" data-scale="0.58"></div></div>
+</div>
+<script>
+  const params = new URLSearchParams(location.search);
+  const canvas = document.getElementById('canvas');
+  canvas.dataset.tint = params.get('screen');
+  document.querySelector('h1').textContent = params.get('title');
+  document.querySelector('p').textContent = params.get('body');
+  const phone = document.querySelector('.phone');
+  phone.dataset.screen = params.get('screen');
+  phone.dataset.status = params.get('status') || 'light';
+</script>
+<script src="phone.js"></script>
+</body>
+</html>

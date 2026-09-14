@@ -1,0 +1,22 @@
+name: readme_media
+description: >-
+  Renders the README and pub.dev imagery for ai_barcode_scanner from the
+  package's real widgets. Not published.
+publish_to: none
+
+environment:
+  sdk: ">=3.7.0 <4.0.0"
+
+dependencies:
+  ai_barcode_scanner:
+    path: ../..
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

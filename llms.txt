@@ -1,0 +1,765 @@
+# ai_barcode_scanner
+
+> Barcode and QR code scanner UI for Flutter (Android, iOS, macOS, web), built on `mobile_scanner` 7.4.x: a one-line full-screen scanner, an embeddable scanner, and a controller, with a responsive reticle, torch/camera/lens/zoom/gallery controls, validation, single/continuous/batch modes, haptics, permission recovery, result rendering and theming. This file is an integration brief for code-generating assistants. It describes version 8.2.x; every signature and default below was checked against the 8.2.0 source, and every recipe passes `flutter analyze` with no issues.
+
+- Version: 8.2.x. Requires Dart >=3.7.0, Flutter >=3.29.0. Depends on `mobile_scanner >=7.4.1 <8.0.0` and `image_picker`.
+- Install: `flutter pub add ai_barcode_scanner` (pubspec: `ai_barcode_scanner: ^8.2.0`).
+- Import (the only one needed): `import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';`
+- Code wins: if this file and the installed package disagree, trust the package. Its path is the `rootUri` of `ai_barcode_scanner` in the app's `.dart_tool/package_config.json`; read `lib/src/` there.
+
+## Rules for assistants
+
+1. **One import.** It re-exports all of `package:mobile_scanner/mobile_scanner.dart` (`BarcodeCapture`, `Barcode`, `BarcodeFormat`, `BarcodeType`, `DetectionSpeed`, `CameraFacing`, `CameraLensType`, `TorchState`, `MobileScannerState`, `MobileScannerException`, `MobileScannerBarcodeException`, `MobileScannerErrorCode`, `WebBarcodeReader`, `MobileScannerController`, `MobileScannerPlatform`, ...). Do not add `mobile_scanner` to pubspec.yaml. Add `image_picker` only if app code itself uses `ImagePicker`/`XFile` (the built-in gallery button needs nothing). The package has no `url_launcher`, `permission_handler` or audio dependency; add one only when app code calls it.
+2. **Pick the entry point from the table below.** Don't hand-roll a route and callback when `showAiBarcodeScanner` fits. Don't mix in `mobile_scanner`'s own `MobileScanner` widget.
+3. **Restrict `formats` whenever the symbologies are known** (a list or a `BarcodeFormatSets` preset). Empty means every format: slower, more misreads.
+4. **Validate with `validator:`, not by filtering inside `onDetect`.** A rejected capture flashes the reticle red, plays the reject haptic, briefly shows `ScannerLabels.invalidBarcode` in the scan hint when `showScanHint` is true, never reaches `onDetect`, and scanning continues. In `ScanMode.single`, detection is paused before `onDetect` runs; to reject from inside `onDetect` (e.g. after a server check), call `resumeScanning()` on your controller (recipe 7).
+5. **One controller, and usually none.** Camera options are widget parameters. Never create a `MobileScannerController` next to the scanner. Create an `AiBarcodeScannerController` only to drive the scanner from outside (own buttons, verify-then-resume, live batch list) and `dispose()` it yourself; wrap a `MobileScannerController` the app already owns with `AiBarcodeScannerController.fromMobileScanner`. With `controller:`, camera options go on the controller: passing `formats`, `torchEnabled`, `returnImage`, `autoZoom`, `invertImage`, `initialZoom` or `cameraResolution` to the widget trips a debug assertion, and `detectionSpeed`, `detectionTimeoutMs`, `facing`, `lensType`, `autoStart` are ignored. There is one camera session: never show two live scanners at once.
+6. **Platform setup is required** on iOS and macOS (below). Android needs no manifest change. The web needs HTTPS or localhost, and a Content Security Policy must allow the decoder hosts, or the app self-hosts the zxing-wasm script (Web, below): pass `webBarcodeLibraryScriptUrl` to `AiBarcodeScanner`, `showAiBarcodeScanner` or `showAiBarcodeScannerBatch`, or, with no scanner on the page, call `AiBarcodeScannerController.setWebImageDecoderScriptUrl` before the first image scan.
+7. **Use current names**: `galleryImagePicker` / `onGalleryImagePick`, not the deprecated `imagePicker` / `onImagePick`, and no 7.x names (table at the end).
+8. **Windows and Linux are unsupported.** The scanner renders `ScannerUnsupportedPlatformView` there (replace it with `unsupportedBuilder`) and image analysis throws `UnsupportedError`. In desktop apps, gate scan buttons with `ScannerPlatformSupport.current.isSupported`.
+9. **The iOS Simulator has no camera and cannot analyze images** (`analyzeImage` / `analyzeScannerImage` throw `UnsupportedError`, although `ScannerPlatformSupport.current.analyzeImage` is `true`). The scanner shows its no-camera error screen there, so there is no gallery button and no scan hint. Verify scanning on a device; cover app logic with widget tests (Testing).
+10. **Theming.** No theme = a built-in palette tuned for camera feeds (a fine default). `flutter/material` apps: `ScannerTheme.fromColorScheme(Theme.of(context).colorScheme)`. `package:material_ui` apps (Flutter 3.47+) need no `MaterialUiCompatibilityBridge`, but `fromColorScheme` cannot take their `ColorScheme`: use `ScannerTheme.fromColors(primary:, onPrimary:, surface:, onSurface:, error:)`. There is no app-wide scanner theme: a scanner reads only its own `theme:` and `overlayConfig:` (a `ScannerThemeScope` placed above it is not read), so build them in one shared helper and pass them to every scanner.
+11. **Camera permission is handled.** The OS prompt appears when the camera starts; a denial shows a built-in screen with "Try again". Don't add `permission_handler` to request access; pass `onOpenSettings:` only to add an "Open settings" button, which appears on the permission-denied screen only.
+12. **After `await`, check `mounted`** (or `context.mounted`). `showAiBarcodeScanner` resolves to `null` when the user backs out.
+13. **Do not invent APIs.** Not in 8.x: `AiBarcodeScanner.show`, `onScan`, `onBarcode`, `onResult`, `ScannerController`, `hideGalleryButton`, `galleryButtonText`, `setPortraitOrientation`, `onCustomImagePicker`, `cutOutSize`, widget-level `borderColor`. If a name is not in this file, read the source first.
+
+## Choose an entry point
+
+| Need | Use |
+| --- | --- |
+| One scan that returns a value (fill a field, open a link) | `await showAiBarcodeScanner(context, ...)` -> `BarcodeCapture?` |
+| Collect several distinct codes, get the list at the end | `await showAiBarcodeScannerBatch(context, maxScans: ...)` -> `List<Barcode>` |
+| Scanner inside an existing page, card or tab | `AiBarcodeScanner.embedded(...)` in a parent with a bounded size |
+| Full-screen scanner you push yourself (stays open, custom chrome) | `AiBarcodeScanner(scanMode: ..., onDetect: ...)` |
+| Own buttons, verify-then-resume, live batch list | `AiBarcodeScanner(controller: AiBarcodeScannerController(...))` |
+| Read a code from an image the app already has, no camera UI | `AiBarcodeScannerController(autoStart: false).analyzeScannerImage(...)` |
+| Present a scanned result (Wi-Fi, contact, link...) | `BarcodeResultSheet.show(context, barcode: ...)` |
+
+`ScanMode.single` (default) reports one accepted capture and pauses detection (the preview keeps running). `continuous` reports every accepted capture, at most one per `scanCooldown`. `batch` collects distinct codes (compared by `rawValue ?? displayValue`), shows a "Done" button, calls `onDetect` for each capture that adds a code and `onScanComplete(List<Barcode>)` on Done or at `maxScans`; detection then stays paused until you call `clearCollected()` and `resumeScanning()`. With the default `DetectionSpeed.noDuplicates`, Android then does not report the last code seen again until a different one has been seen.
+
+Default controls: `AiBarcodeScanner` = `{gallery, cameraSwitch, torch}` with a filled gallery button; `showAiBarcodeScanner` adds `close`; `showAiBarcodeScannerBatch` = `{cameraSwitch, torch, close}` and no gallery; `AiBarcodeScanner.embedded` = `{}`, `GalleryButtonType.none`, `showScanHint: false`. Controls the platform or device cannot back are hidden, and the controls over the preview appear only once the camera has started. `ScannerAction.close` renders in the default app bar, so a plain `AiBarcodeScanner` you push yourself shows no close button unless `enabledActionButtons` includes `ScannerAction.close` (add it, or your own way back), and a custom `appBarBuilder` replaces it.
+
+## Platform setup
+
+**iOS** (deployment target at least 12.0) and **macOS** (at least 10.14): these are `mobile_scanner`'s minimums, which every Flutter 3.29+ template meets (new Flutter 3.47 projects target iOS 15.0 / macOS 12.0); never lower a higher target. The photo-library and file keys are needed only while the gallery button is enabled (it is by default on the full-screen scanner):
+
+```xml
+<!-- ios/Runner/Info.plist, and NSCameraUsageDescription also in macos/Runner/Info.plist -->
+<key>NSCameraUsageDescription</key><string>This app needs camera access to scan barcodes.</string>
+<key>NSPhotoLibraryUsageDescription</key><string>This app needs photo library access to scan barcodes from images.</string>
+<!-- macos/Runner/DebugProfile.entitlements and Release.entitlements (or tick Camera in Signing & Capabilities) -->
+<key>com.apple.security.device.camera</key><true/>
+<key>com.apple.security.files.user-selected.read-only</key><true/>
+```
+
+**Android.** No manifest change: `mobile_scanner` declares the camera permission. Build minimums (from mobile_scanner 7.4 / CameraX 1.6): minSdk 23, compileSdk 36, Android Gradle Plugin 8.9.1+, Kotlin Gradle Plugin 2.x; older app templates must raise them in `android/settings.gradle(.kts)` and `android/app/build.gradle(.kts)`. Optional: `dev.steenbakker.mobile_scanner.useUnbundled=true` in `android/gradle.properties` downloads the ML Kit model at runtime instead of bundling it.
+
+**Web.** Camera needs a secure context (HTTPS or localhost). Nothing goes in `index.html`: libraries load on first use. `WebBarcodeReader.auto` (default) uses the browser's `BarcodeDetector` where available and zxing-wasm elsewhere (e.g. Firefox); picked images are always read by the package's own zxing-wasm 3.1.3 decoder. zxing-wasm's script comes from `cdn.jsdelivr.net` and its WebAssembly from `fastly.jsdelivr.net` (`WebBarcodeReader.zxingJs` loads from `unpkg.com`). CSP for the default setup:
+
+```text
+script-src  https://cdn.jsdelivr.net 'wasm-unsafe-eval';
+connect-src https://fastly.jsdelivr.net blob:;
+```
+
+`blob:` is how a picked file is read back; also allow `data:` or an `http(s)` origin if you pass such URLs to `analyzeImage` / `ScannerImage.path`. To avoid the jsDelivr script, copy zxing-wasm 3.1.3's `dist/iife/reader/index.js` to the app's `web/zxing-wasm/index.js` and pass `webBarcodeLibraryScriptUrl: 'zxing-wasm/index.js'` (relative, so it respects `<base href>`); that works with the default `auto` reader and with `WebBarcodeReader.zxingWasm`, and the same copy reads picked images. Under a strict CSP: (a) `AiBarcodeScanner`, `showAiBarcodeScanner` and `showAiBarcodeScannerBatch` all take `webBarcodeLibraryScriptUrl` (and `webBarcodeReader`), so keep the one-liner; (b) an app that scans images with no scanner on the page (a standalone `analyzeScannerImage` / `analyzeImage`) calls `AiBarcodeScannerController.setWebImageDecoderScriptUrl('zxing-wasm/index.js')` once, e.g. in `main()`, before the first scan — it does nothing off the web and does not move the camera's library; (c) the URL is page-wide and the first one set wins, from that call or any scanner; once zxing-wasm is on the page that copy is reused; (d) the `.wasm` always comes from `fastly.jsdelivr.net`. To avoid zxing-wasm for gallery picks altogether, decode them yourself with `galleryImageAnalyzer`. With a `zxingJs` mirror the web gallery button is hidden unless `galleryImageAnalyzer` is given. Hide it on the web only with `galleryButtonType: kIsWeb ? GalleryButtonType.none : GalleryButtonType.filled` (`kIsWeb` from `package:flutter/foundation.dart`).
+
+| `ScannerPlatformSupport.current` | Android | iOS | macOS | Web |
+| --- | :-: | :-: | :-: | :-: |
+| `isSupported`, `scanWindow`, `barcodeCorners` | yes | yes | yes | yes |
+| `analyzeImage` (gallery) | yes | yes (not Simulator) | yes | yes (zxing-wasm) |
+| `torch`, `tapToFocus`, `lensType` | yes | yes | no | no |
+| `zoom` | yes | yes | yes | no |
+| `autoZoom`, `invertImage` | yes | no | no | no |
+| `cameraResolution` | yes | no | no | yes (a hint the browser may not honour) |
+| `returnImage` | yes | yes | yes | no |
+
+## API reference
+
+### Functions
+
+```dart
+// Pushes a MaterialPageRoute and pops it with the first accepted capture; null if dismissed.
+Future<BarcodeCapture?> showAiBarcodeScanner(BuildContext context, {
+  bool Function(BarcodeCapture capture)? validator, List<BarcodeFormat> formats = const <BarcodeFormat>[],
+  DetectionSpeed detectionSpeed = DetectionSpeed.noDuplicates, CameraFacing facing = CameraFacing.back,
+  bool torchEnabled = false, ScannerTheme? theme, ScannerLabels labels = const ScannerLabels(),
+  ScannerOverlayConfig overlayConfig = const ScannerOverlayConfig(), ScanWindowConfig scanWindowConfig = const ScanWindowConfig(),
+  ScannerFeedbackConfig feedback = const ScannerFeedbackConfig(),
+  Set<ScannerAction> enabledActionButtons = const {ScannerAction.gallery, ScannerAction.cameraSwitch, ScannerAction.torch, ScannerAction.close},
+  GalleryButtonType galleryButtonType = GalleryButtonType.filled,
+  Future<ScannerImage?> Function(BuildContext context)? galleryImagePicker, void Function(ScannerImage? image)? onGalleryImagePick,
+  Future<BarcodeCapture?> Function(ScannerImage image, List<BarcodeFormat> formats)? galleryImageAnalyzer,
+  void Function(Object error, StackTrace stackTrace)? onGalleryScanError,
+  WebBarcodeReader? webBarcodeReader, String? webBarcodeLibraryScriptUrl, // web only; as on AiBarcodeScanner
+  bool showScanHint = true, List<DeviceOrientation>? preferredOrientations, VoidCallback? onOpenSettings,
+  RouteSettings? routeSettings, bool fullscreenDialog = true, bool useRootNavigator = false})
+
+// Batch mode. Returns the distinct codes on Done or at maxScans; back/close returns [] and discards them.
+Future<List<Barcode>> showAiBarcodeScannerBatch(BuildContext context, {
+  int? maxScans, bool Function(BarcodeCapture capture)? validator, List<BarcodeFormat> formats = const <BarcodeFormat>[],
+  CameraFacing facing = CameraFacing.back, ScannerTheme? theme, ScannerLabels labels = const ScannerLabels(),
+  ScannerOverlayConfig overlayConfig = const ScannerOverlayConfig(), ScanWindowConfig scanWindowConfig = const ScanWindowConfig(),
+  ScannerFeedbackConfig feedback = const ScannerFeedbackConfig(),
+  Set<ScannerAction> enabledActionButtons = const {ScannerAction.cameraSwitch, ScannerAction.torch, ScannerAction.close},
+  WebBarcodeReader? webBarcodeReader, String? webBarcodeLibraryScriptUrl, // web only; as on AiBarcodeScanner
+  bool showScanHint = true, List<DeviceOrientation>? preferredOrientations, VoidCallback? onOpenSettings,
+  RouteSettings? routeSettings, bool fullscreenDialog = true, bool useRootNavigator = false})
+```
+
+### AiBarcodeScanner (StatefulWidget)
+
+`const AiBarcodeScanner({...})` is full screen (inside a `Scaffold`). `const AiBarcodeScanner.embedded({...})` has no `Scaffold` and lacks the parameters marked `// full screen`.
+
+```dart
+Key? key,
+// Detection
+void Function(BarcodeCapture capture)? onDetect,          // accepted captures only
+bool Function(BarcodeCapture capture)? validator,         // false rejects; a throw rejects and goes to onDetectError
+void Function(Object error, StackTrace stackTrace)? onDetectError,
+void Function(List<Barcode> barcodes)? onScanComplete,    // ScanMode.batch
+// Camera: ignored when `controller` is set (set them on the controller)
+AiBarcodeScannerController? controller,
+List<BarcodeFormat> formats = const <BarcodeFormat>[],    // empty = every format
+DetectionSpeed detectionSpeed = DetectionSpeed.noDuplicates, // noDuplicates | normal | unrestricted
+int detectionTimeoutMs = 250,                             // only applies with DetectionSpeed.normal
+CameraFacing facing = CameraFacing.back, CameraLensType lensType = CameraLensType.any, // any | normal | wide | zoom
+Size? cameraResolution, bool torchEnabled = false, bool autoStart = true, // cameraResolution: Android; a hint on web
+bool autoZoom = false, bool invertImage = false, double? initialZoom, // autoZoom, invertImage: Android; zoom 0..1
+bool returnImage = false,                                 // fills BarcodeCapture.image; not on web
+WebBarcodeReader? webBarcodeReader, String? webBarcodeLibraryScriptUrl, // web only; reader null keeps the page's current reader (auto unless another scanner set one)
+// Behaviour
+ScanMode scanMode = ScanMode.single, int? maxScans,
+Duration scanCooldown = const Duration(milliseconds: 1200), // continuous throttle; also throttles reject feedback
+Duration resultFlashDuration = const Duration(milliseconds: 1000),
+bool useAppLifecycleState = true,                         // stop when inactive, restart on resume
+List<DeviceOrientation>? preferredOrientations,           // full screen; null leaves the app's policy alone
+List<DeviceOrientation>? restoreOrientationsOnDispose = DeviceOrientation.values, // full screen
+bool tapToFocus = true, bool enablePinchToZoom = true, double pinchZoomSensitivity = 1.0,
+bool doubleTapToResetZoom = true, Duration idleHintDelay = const Duration(seconds: 6),
+bool showScanHint = true,                                 // embedded default: false; also gates the invalidBarcode, noBarcodeFoundInImage and galleryUnsupported messages
+// Appearance
+ScannerTheme? theme, ScannerLabels labels = const ScannerLabels(),
+ScannerOverlayConfig overlayConfig = const ScannerOverlayConfig(), ScanWindowConfig scanWindowConfig = const ScanWindowConfig(),
+ScannerFeedbackConfig feedback = const ScannerFeedbackConfig(),
+Set<ScannerAction> enabledActionButtons = const {ScannerAction.gallery, ScannerAction.cameraSwitch, ScannerAction.torch}, // no close; embedded: {}
+GalleryButtonType galleryButtonType = GalleryButtonType.filled, // none | icon | filled; embedded: none
+IconData galleryIcon = Icons.photo_library_outlined, IconData cameraSwitchIcon = Icons.cameraswitch_outlined,
+IconData flashOnIcon = Icons.flashlight_on, IconData flashOffIcon = Icons.flashlight_off_outlined,
+IconData lensIcon = Icons.center_focus_strong_outlined, IconData closeIcon = Icons.close,
+BoxFit fit = BoxFit.cover, bool extendBodyBehindAppBar = true, // extendBodyBehindAppBar: full screen
+// Builders
+PreferredSizeWidget? Function(BuildContext, AiBarcodeScannerController)? appBarBuilder, // full screen; replaces the app bar AND its close button
+Widget? Function(BuildContext, AiBarcodeScannerController)? bottomSheetBuilder,          // full screen
+Widget? Function(BuildContext, AiBarcodeScannerController)? bottomNavigationBarBuilder,  // full screen
+Widget Function(BuildContext context, BoxConstraints constraints, AiBarcodeScannerController controller, Rect scanWindow, bool? isSuccess)? overlayBuilder, // isSuccess null = idle
+Widget Function(BuildContext context, MobileScannerException error)? errorBuilder,       // default ScannerErrorView
+Widget Function(BuildContext context)? placeholderBuilder,  // while the camera starts
+Widget Function(BuildContext context)? unsupportedBuilder,  // Windows, Linux
+List<Widget>? actions,                                    // full screen; appended to the default app bar
+Widget? child,                                            // stacked over the preview, IN ADDITION to the controls
+Rect? scanWindow,                                         // explicit rect in preview coordinates; overrides scanWindowConfig
+bool restrictDetectionToScanWindow = false,               // false: the reticle is guidance only
+double scanWindowUpdateThreshold = 0.0,
+// Gallery (a picked image goes through validator, feedback and the overlay flash like a camera scan)
+Future<ScannerImage?> Function(BuildContext context)? galleryImagePicker, // replaces image_picker; null = cancelled
+void Function(ScannerImage? image)? onGalleryImagePick,                   // before analysis; null = cancelled
+Future<BarcodeCapture?> Function(ScannerImage image, List<BarcodeFormat> formats)? galleryImageAnalyzer, // replaces decoding everywhere
+void Function(Object error, StackTrace stackTrace)? onGalleryScanError,   // otherwise FlutterError.reportError
+@Deprecated Future<String?> Function(BuildContext context)? imagePicker,  // -> galleryImagePicker (assert if both)
+@Deprecated void Function(String? path)? onImagePick,                     // -> onGalleryImagePick
+// Callbacks
+VoidCallback? onDispose, VoidCallback? onClose,            // onClose: full screen; default pops the route
+void Function(AiBarcodeScannerController controller)? onScannerStarted,
+void Function(MobileScannerException error)? onError,
+VoidCallback? onOpenSettings,                             // shows "Open settings" on the permission screen
+void Function(double zoomScale)? onZoomChanged, void Function(TorchState state)? onTorchChanged,
+```
+
+### AiBarcodeScannerController (extends ChangeNotifier)
+
+```dart
+AiBarcodeScannerController({bool autoStart = true, Size? cameraResolution,
+  CameraLensType lensType = CameraLensType.any, DetectionSpeed detectionSpeed = DetectionSpeed.noDuplicates,
+  int detectionTimeoutMs = 250, CameraFacing facing = CameraFacing.back,
+  List<BarcodeFormat> formats = const <BarcodeFormat>[], bool returnImage = false,
+  bool torchEnabled = false, bool invertImage = false, bool autoZoom = false, double? initialZoom})
+AiBarcodeScannerController.fromMobileScanner(MobileScannerController controller) // not disposed by dispose()
+static void setWebImageDecoderScriptUrl(String scriptUrl) // web image decoder loads zxing-wasm from here; page-wide, first URL wins, call before the first image scan; no-op off the web; not the camera's library
+
+MobileScannerController get raw;               // escape hatch; raw.analyzeImage throws on the web
+ValueListenable<MobileScannerState> get state; // torchState, zoomScale, isRunning, isInitialized, error, cameraDirection, availableCameras
+MobileScannerState get value;
+Stream<BarcodeCapture> get barcodes;           // unfiltered, including detections while paused
+bool get isScanningPaused, isRunning, isInitialized, isTorchOn, hasTorch, hasMultipleCameras;
+List<Barcode> get collected;                   // batch; unmodifiable, oldest first
+void pauseScanning(); void resumeScanning();   // detection only; the preview keeps running
+bool collect(Barcode barcode); void clearCollected();
+Future<void> start({CameraFacing? cameraDirection, CameraLensType? cameraLensType});
+Future<void> stop(); Future<void> pause();     // the camera session
+Future<void> toggleTorch(); Future<void> setTorch({required bool on});
+Future<void> switchCamera([SwitchCameraOption option = const ToggleDirection()]); Future<void> switchLens();
+Future<Set<CameraLensType>> supportedLenses({CameraFacing? facing});
+Future<bool> useCloseRangeLens({CameraFacing facing = CameraFacing.back}); // only switches on iOS 15+
+Future<void> setZoomScale(double zoomScale); Future<void> resetZoomScale(); // 0..1, clamped
+Future<void> setFocusPoint(Offset position);   // 0..1 relative to the preview
+Future<BarcodeCapture?> analyzeImage(String path, {List<BarcodeFormat> formats = const <BarcodeFormat>[]});
+Future<BarcodeCapture?> analyzeScannerImage(ScannerImage image, {List<BarcodeFormat> formats = const <BarcodeFormat>[]});
+```
+
+`pauseScanning`, `resumeScanning`, `collect` and `clearCollected` notify listeners; camera state changes come through `state`. Torch, zoom and focus calls do nothing when the camera is not running or the platform lacks the feature. `analyzeImage` / `analyzeScannerImage` need no running camera; `null` and an empty capture both mean "nothing found"; they throw `MobileScannerBarcodeException` (its `message` is a `String?` describing the failure) for an unreadable image and `UnsupportedError` on Windows, Linux and the iOS Simulator. On the web a path is a URL (`blob:`, `data:`, `http(s):`). They run no validator: check the result yourself, e.g. `if (capture != null && validator(capture)) ...` with the same `bool Function(BarcodeCapture)` you give the scanner.
+
+### ScannerImage, validators, format sets
+
+```dart
+const ScannerImage.path(String path, {String? name, String? mimeType})      // file path; on the web a fetchable URL
+const ScannerImage.bytes(Uint8List bytes, {String? name, String? mimeType}) // ENCODED file bytes (PNG, JPEG...), not pixels
+ScannerImage.xFile(XFile file)                                               // image_picker, file_selector, camera...
+final String? path; final Uint8List? bytes; final String? name; final String? mimeType;
+Future<Uint8List> readAsBytes();
+
+// ScanValidators: static, each returns bool Function(BarcodeCapture) and checks the FIRST barcode;
+// value checks read its displayValue if non-empty, else rawValue.
+ScanValidators.any                               // itself a validator (accepts everything)
+ScanValidators.all(List<bool Function(BarcodeCapture)> validators) / .either(...)
+ScanValidators.formats(Set<BarcodeFormat> formats) / .types(Set<BarcodeType> types)
+ScanValidators.contains(String needle, {bool caseSensitive = true})
+ScanValidators.startsWith(String prefix) / .length(int length)
+ScanValidators.matches(RegExp pattern)           // anchored: the whole value must match
+ScanValidators.url({Set<String>? allowedHosts})  // absolute URL with a host, any scheme
+
+// BarcodeFormatSets (const List<BarcodeFormat>)
+qrOnly = [qrCode]; twoDimensional = [qrCode, microQrCode, aztec, dataMatrix, pdf417, maxiCode];
+retail = [ean13, ean8, upcA, upcE, code128, dataBar, dataBarExpanded, dataBarLimited];
+logistics = [code128, code39, code93, itf14, dataMatrix, qrCode]; documents = [pdf417, qrCode, aztec, dataMatrix];
+```
+
+`BarcodeFormat`: `code128, code39, code93, codabar, dataMatrix, ean13, ean8, itf2of5, itf2of5WithChecksum, itf14, qrCode, upcA, upcE, pdf417, aztec, maxiCode, microQrCode, dataBar, dataBarExpanded, dataBarLimited` (plus `all`, `unknown`). `BarcodeType`: `contactInfo, email, isbn, phone, product, sms, text, url, wifi, geo, calendarEvent, driverLicense, unknown`.
+
+### Results
+
+`BarcodeCapture`: `barcodes`, `image` (`Uint8List?`, only with `returnImage`), `size`. `Barcode`: `rawValue`, `displayValue`, `format`, `type`, `corners`, `rawDecodedBytes`, and typed payloads `url`, `wifi`, `email`, `phone`, `sms`, `geoPoint`, `contactInfo`, `calendarEvent`, `driverLicense`. Extensions exported by this package:
+
+```dart
+capture.firstBarcode      // Barcode?        capture.firstRawValue      // String?
+capture.firstDisplayValue // String?, bestValue of the first barcode   capture.values // List<String>
+barcode.bestValue   // displayValue if non-empty, else rawValue ?? ''   barcode.isEmpty
+barcode.typeLabel   // 'Wi-Fi', 'Link'...   barcode.typeIcon // IconData   barcode.boundingBox // Rect?
+barcode.actionUri   // Uri? for url, mailto:, tel:, sms:, geo:, or text that parses as scheme + host
+barcode.fields      // List<BarcodeField(key, label, value, obscure)>
+format.displayName  // 'QR Code', 'EAN-13'   format.isTwoDimensional
+
+static Future<void> BarcodeResultSheet.show(BuildContext context, {required Barcode barcode,
+  ScannerLabels labels = const ScannerLabels(), ScannerTheme? theme,
+  void Function(Uri uri)? onOpen, void Function(String value)? onShare, bool revealObscuredFields = false})
+// Copy is always shown; Open only when onOpen != null and actionUri != null; Share only with onShare.
+```
+
+### Configuration (all `@immutable` with `copyWith`; an untyped parameter has the type before it)
+
+```dart
+ScannerTheme({Color? reticleColor, reticleSuccessColor, reticleErrorColor, double? reticleStrokeWidth,
+  Color? scanLineColor, overlayColor, double? overlayBlurSigma, Color? controlBackgroundColor,
+  controlForegroundColor, controlActiveBackgroundColor, controlActiveForegroundColor,
+  double? controlSize, controlSpacing, Color? barcodeHighlightColor, double? barcodeHighlightStrokeWidth,
+  Color? focusRingColor, TextStyle? hintTextStyle, Color? hintBackgroundColor,
+  Color? surfaceColor, onSurfaceColor, double? borderRadius}) // null = ScannerTheme.fallback
+factory ScannerTheme.fromColorScheme(ColorScheme scheme)      // flutter/material ColorScheme only
+factory ScannerTheme.fromColors({required Color primary, Color? onPrimary, Color? surface, Color? onSurface, Color? error})
+
+ScannerOverlayConfig({Color? animationColor, borderColor, backgroundColor, double borderRadius = 24, cornerRadius = 24,
+  ScannerAnimation scannerAnimation = ScannerAnimation.center,                     // center | fullWidth | none
+  ScannerOverlayBackground scannerOverlayBackground = ScannerOverlayBackground.blur, // blur | dim | none
+  ScannerBorder scannerBorder = ScannerBorder.corner,                              // corner | full | none
+  Curve? curve, Widget? background, double lineThickness = 4, double? borderStrokeWidth,
+  Animation<double>? animation, Duration animationDuration = const Duration(milliseconds: 1500),
+  Color? successColor, errorColor, bool animateOnSuccess = true, animateOnError = true,
+  double cornerLength = 44, double? blurSigma, bool respectReduceMotion = true,
+  bool showBarcodeHighlights = false, Duration stateTransitionDuration = const Duration(milliseconds: 220)})
+const ScannerOverlayConfig.minimal({borderColor, successColor, errorColor, borderRadius = 24,
+  cornerRadius = 24, cornerLength = 44, borderStrokeWidth})  // no dimming, blur or animation
+
+ScanWindowConfig({ScanWindowShape shape = ScanWindowShape.auto, // auto | square | wide | tall | fullPreview | custom
+  double? widthFactor, heightFactor, aspectRatio, double minWidth = 140, minHeight = 96, maxWidth = 460, maxHeight = 460,
+  Alignment alignment = const Alignment(0, -0.08), EdgeInsets padding = const EdgeInsets.all(24),
+  Rect Function(BuildContext context, BoxConstraints constraints)? builder})
+const ScanWindowConfig.fullPreview()
+const ScanWindowConfig.builder(Rect Function(BuildContext context, BoxConstraints constraints) builder)
+// auto = square when the widget's `formats` is empty or all 2D (so always square with a controller);
+// otherwise a landscape rectangle, 1.6:1 (less elongated than ScanWindowShape.wide)
+
+ScannerFeedbackConfig({ScannerHaptic detectHaptic = ScannerHaptic.medium, rejectHaptic = ScannerHaptic.heavy,
+  controlHaptic = ScannerHaptic.selection, bool playSystemSound = true,
+  SystemSoundType detectSound = SystemSoundType.click, rejectSound = SystemSoundType.alert,
+  void Function(ScannerFeedbackEvent event)? onFeedback})     // ScannerFeedbackEvent: detect | reject | control
+const ScannerFeedbackConfig.silent({onFeedback})            // ScannerHaptic: none | selection | light | medium | heavy | vibrate
+```
+
+`ScannerLabels({...})`: every user-visible string, English defaults, set only what you translate. `String` fields: `galleryButton, galleryTooltip, torchOnTooltip, torchOffTooltip, torchAutoTooltip, switchCameraTooltip, switchLensTooltip, closeTooltip, zoomTooltip, resetZoomTooltip, scanHint, scanHintIdle, scanHintBatch, doneButton, retryButton, openSettingsButton, cameraErrorTitle, cameraErrorMessage, permissionDeniedTitle, permissionDeniedMessage, cameraUnsupportedTitle, cameraUnsupportedMessage, startingCamera, noBarcodeFoundInImage, galleryUnsupported, invalidBarcode, copyAction, copiedConfirmation, openAction, shareAction, dismissSheetLabel, unsupportedPlatformTitle`; plus `scannedCountLabel` (`String Function(int)`), `unsupportedPlatformMessage` (`String Function(String)`), `barcodeTypeLabels` (`Map<String, String>` keyed by `BarcodeType.name`) and `barcodeFieldLabels` (keyed by `BarcodeField.key`, e.g. `'wifi.ssid'`). Three are transient messages that replace the scan hint for a couple of seconds and are announced to screen readers, only when `showScanHint` is true: `invalidBarcode` (the validator rejected a camera or gallery capture; throttled by `scanCooldown`), `noBarcodeFoundInImage` (a picked image gave `null` or an empty capture; not on cancel) and `galleryUnsupported` (picking or analysing the image threw `UnsupportedError`, `UnimplementedError` included). Any other gallery error shows no message. An empty string turns that one message off; a scan that reaches `onDetect` clears `invalidBarcode` at once.
+
+`ScannerAction`: `cameraSwitch, torch, gallery, lens, zoom, close`. `ScannerPlatformSupport.current` also has static `currentPlatformName, isDesktop, isMobile, supportsOrientationLock`. Chrome widgets for custom UIs: `ScannerErrorView, ScannerUnsupportedPlatformView, ScannerOverlay, ScannerControlButton, ScannerCountBadge, ScannerControlsBar, ScannerZoomSlider, ScanHint, FocusIndicator, ScannerThemeScope`.
+
+## Recipes
+
+Complete files; the first line is the suggested path and `my_app` is the app's package name.
+
+### 1. Scan button that fills a TextField
+
+```dart
+// lib/scan_field.dart
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:flutter/material.dart';
+
+/// A text field with a scan button. The parent owns and disposes [controller].
+class ScanField extends StatelessWidget {
+  const ScanField({super.key, required this.controller});
+
+  final TextEditingController controller;
+
+  Future<void> _scan(BuildContext context) async {
+    final capture = await showAiBarcodeScanner(
+      context,
+      formats: BarcodeFormatSets.retail,
+      validator: ScanValidators.matches(RegExp(r'\d{8,14}')), // a rejected code keeps the scanner open
+    );
+    final value = capture?.firstDisplayValue; // the value the validator checked; null: the user backed out
+    if (value != null && context.mounted) controller.text = value;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      decoration: InputDecoration(
+        labelText: 'Barcode',
+        suffixIcon: IconButton(
+          tooltip: 'Scan barcode', icon: const Icon(Icons.qr_code_scanner), onPressed: () => _scan(context)),
+      ),
+    );
+  }
+}
+```
+
+### 2. QR scanner that accepts only links to allowed hosts, then opens them
+
+```dart
+// lib/open_link_scanner.dart
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart'; // the app adds url_launcher itself
+
+Future<void> scanAndOpenLink(BuildContext context) async {
+  final capture = await showAiBarcodeScanner(
+    context,
+    formats: BarcodeFormatSets.qrOnly,
+    validator: ScanValidators.all([
+      ScanValidators.startsWith('https://'),
+      ScanValidators.url(allowedHosts: {'example.com', 'www.example.com'}),
+    ]),
+    labels: const ScannerLabels(scanHint: 'Scan the QR code on your ticket'),
+  );
+  final link = capture?.firstDisplayValue; // the same value the validators checked
+  if (link == null) return; // cancelled
+  await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+}
+
+/// Any QR payload (Wi-Fi, contact, link...) shown in the built-in result sheet.
+Future<void> scanAndShowResult(BuildContext context) async {
+  final capture = await showAiBarcodeScanner(context, formats: BarcodeFormatSets.qrOnly);
+  if (capture == null || !context.mounted) return;
+  await BarcodeResultSheet.show(context, barcode: capture.barcodes.first, onOpen: launchUrl);
+}
+```
+
+### 3. Embedded scanner with a validator
+
+```dart
+// lib/ticket_scanner_card.dart
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:flutter/material.dart';
+
+/// A scanner card for an existing page. Keeps scanning; accepts only TICKET-123456 codes.
+class TicketScannerCard extends StatelessWidget {
+  const TicketScannerCard({super.key, required this.onTicket});
+
+  final ValueChanged<String> onTicket;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: SizedBox(
+        height: 320, // an embedded scanner needs a bounded size
+        child: AiBarcodeScanner.embedded(
+          formats: BarcodeFormatSets.qrOnly,
+          scanMode: ScanMode.continuous,
+          scanCooldown: const Duration(seconds: 2), // at most one accepted scan per 2 s
+          validator: ScanValidators.matches(RegExp(r'TICKET-\d{6}')),
+          overlayConfig: const ScannerOverlayConfig.minimal(),
+          enabledActionButtons: const {ScannerAction.torch},
+          onDetect: (capture) {
+            final code = capture.firstDisplayValue; // the value the validator checked
+            if (code != null) onTicket(code);
+          },
+        ),
+      ),
+    );
+  }
+}
+```
+
+### 4. Batch inventory
+
+```dart
+// lib/inventory_page.dart
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:flutter/material.dart';
+
+/// Simplest: distinct codes on Done or at maxScans; [] if the user closes the scanner.
+Future<List<Barcode>> scanInventory(BuildContext context) =>
+    showAiBarcodeScannerBatch(context, maxScans: 50, formats: BarcodeFormatSets.retail);
+
+/// Embedded batch scanner with a live list driven by the controller.
+class InventoryPage extends StatefulWidget {
+  const InventoryPage({super.key, required this.onSubmit});
+
+  final void Function(List<Barcode> barcodes) onSubmit;
+
+  @override
+  State<InventoryPage> createState() => _InventoryPageState();
+}
+
+class _InventoryPageState extends State<InventoryPage> {
+  // With a controller, camera options go on the controller. You own it.
+  final _scanner = AiBarcodeScannerController(formats: BarcodeFormatSets.retail);
+
+  @override
+  void dispose() {
+    _scanner.dispose();
+    super.dispose();
+  }
+
+  void _complete(List<Barcode> barcodes) {
+    widget.onSubmit(barcodes);
+    _scanner.clearCollected(); // a finished batch pauses detection:
+    _scanner.resumeScanning(); // clear, then resume for the next batch
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 300,
+          child: AiBarcodeScanner.embedded(
+            controller: _scanner,
+            scanMode: ScanMode.batch, // adds the Done button
+            scanWindowConfig: const ScanWindowConfig(shape: ScanWindowShape.wide), // linear codes
+            enabledActionButtons: const {ScannerAction.torch},
+            onScanComplete: _complete,
+          ),
+        ),
+        Expanded(
+          child: ListenableBuilder(
+            listenable: _scanner, // notifies on collect and clear
+            builder: (context, _) => ListView(children: [
+              for (final b in _scanner.collected)
+                ListTile(leading: Icon(b.typeIcon), title: Text(b.bestValue), subtitle: Text(b.format.displayName)),
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+}
+```
+
+### 5. Theme the scanner from the app's colours
+
+```dart
+// lib/themed_scanner.dart (app on package:flutter/material.dart)
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:flutter/material.dart';
+
+Future<BarcodeCapture?> scanWithAppTheme(BuildContext context) {
+  return showAiBarcodeScanner(
+    context,
+    theme: ScannerTheme.fromColorScheme(Theme.of(context).colorScheme).copyWith(overlayBlurSigma: 0),
+    overlayConfig: const ScannerOverlayConfig(
+      scannerBorder: ScannerBorder.full,
+      scannerOverlayBackground: ScannerOverlayBackground.dim, // cheaper than blur
+    ),
+  );
+}
+```
+
+```dart
+// lib/themed_scanner_material_ui.dart (app on package:material_ui; no bridge needed)
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:material_ui/material_ui.dart';
+
+/// material_ui's ColorScheme is not flutter/material's, so pass plain colours.
+/// Usage: showAiBarcodeScanner(context, theme: scannerThemeOf(context))
+ScannerTheme scannerThemeOf(BuildContext context) {
+  final s = Theme.of(context).colorScheme;
+  return ScannerTheme.fromColors(
+    primary: s.primary, onPrimary: s.onPrimary, surface: s.surface, onSurface: s.onSurface, error: s.error);
+}
+```
+
+### 6. Gallery: custom picker returning bytes, or your own decoder
+
+```dart
+// lib/gallery_scanner.dart
+import 'dart:typed_data';
+
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart'; // app code uses ImagePicker, so the app adds image_picker
+
+/// Bytes work on every platform, the web included (browsers expose no file paths).
+Future<BarcodeCapture?> scanFromPickedBytes(BuildContext context) {
+  return showAiBarcodeScanner(
+    context,
+    formats: BarcodeFormatSets.qrOnly,
+    galleryImagePicker: (context) async {
+      final file = await ImagePicker().pickImage(source: ImageSource.gallery);
+      if (file == null) return null; // cancelled
+      return ScannerImage.bytes(await file.readAsBytes(), name: file.name, mimeType: file.mimeType);
+    },
+    onGalleryScanError: (error, stackTrace) => debugPrint('Image scan failed: $error'),
+  );
+}
+
+/// Offline app, strict CSP or server-side decoding: the built-in web decoder is never loaded.
+AiBarcodeScanner serverDecodedScanner({
+  required Future<String?> Function(Uint8List encodedImage) decode,
+  required void Function(BarcodeCapture capture) onDetect,
+}) {
+  return AiBarcodeScanner(
+    formats: BarcodeFormatSets.qrOnly,
+    galleryImageAnalyzer: (image, formats) async {
+      final text = await decode(await image.readAsBytes());
+      if (text == null) return null; // nothing found: red flash and ScannerLabels.noBarcodeFoundInImage
+      return BarcodeCapture(barcodes: [Barcode(rawValue: text, displayValue: text, format: BarcodeFormat.qrCode)]);
+    },
+    onDetect: onDetect,
+  );
+}
+```
+
+### 7. Controller: verify then resume, torch, zoom, pause, analyzeScannerImage
+
+```dart
+// lib/controlled_scanner_page.dart
+import 'dart:typed_data';
+
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:flutter/material.dart';
+
+class ControlledScannerPage extends StatefulWidget {
+  const ControlledScannerPage({super.key, required this.verify});
+
+  final Future<bool> Function(String code) verify; // e.g. a server lookup
+
+  @override
+  State<ControlledScannerPage> createState() => _ControlledScannerPageState();
+}
+
+class _ControlledScannerPageState extends State<ControlledScannerPage> {
+  final _scanner = AiBarcodeScannerController(formats: BarcodeFormatSets.qrOnly);
+
+  @override
+  void dispose() {
+    _scanner.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    final code = capture.firstRawValue; // ScanMode.single has already paused detection
+    final ok = code != null && await widget.verify(code);
+    if (!mounted) return;
+    if (ok) return Navigator.of(context).pop(code);
+    _scanner.resumeScanning(); // rejected: keep scanning
+  }
+
+  Widget _button(String tooltip, IconData icon, VoidCallback onPressed) =>
+      IconButton(color: Colors.white, tooltip: tooltip, icon: Icon(icon), onPressed: onPressed);
+
+  @override
+  Widget build(BuildContext context) {
+    return AiBarcodeScanner(
+      controller: _scanner,
+      enabledActionButtons: const {ScannerAction.close},
+      galleryButtonType: GalleryButtonType.none,
+      onDetect: _onDetect,
+      child: SafeArea( // `child` is drawn over the preview, in addition to the built-in controls
+        child: Align(
+          alignment: Alignment.topRight,
+          child: ListenableBuilder(
+            listenable: Listenable.merge([_scanner, _scanner.state]), // pause state + camera state
+            builder: (context, _) => Row(mainAxisSize: MainAxisSize.min, children: [
+              if (_scanner.hasTorch)
+                _button('Torch', _scanner.isTorchOn ? Icons.flashlight_on : Icons.flashlight_off, _scanner.toggleTorch),
+              _button('Zoom', Icons.zoom_in, () => _scanner.setZoomScale(_scanner.value.zoomScale >= 0.5 ? 0 : 0.5)),
+              _scanner.isScanningPaused
+                  ? _button('Resume', Icons.play_arrow, _scanner.resumeScanning)
+                  : _button('Pause', Icons.pause, _scanner.pauseScanning),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Reads a QR code from an encoded image the app already has (share intent, clipboard,
+/// download), with no camera UI. On a scanner screen, use that scanner's controller instead.
+/// Strict-CSP web app: call AiBarcodeScannerController.setWebImageDecoderScriptUrl in main() first.
+Future<String?> readQrCode(Uint8List encodedImage) async {
+  if (!ScannerPlatformSupport.current.analyzeImage) return null; // Windows, Linux
+  final scanner = AiBarcodeScannerController(autoStart: false);
+  try {
+    final capture = await scanner.analyzeScannerImage(ScannerImage.bytes(encodedImage), formats: BarcodeFormatSets.qrOnly);
+    return capture?.firstRawValue; // null or an empty capture: nothing found
+  } on MobileScannerBarcodeException {
+    return null; // unreadable image; on the web also a CSP or network failure
+  } on UnsupportedError {
+    return null; // iOS Simulator
+  } finally {
+    scanner.dispose();
+  }
+}
+```
+
+## Testing
+
+Widget tests have no camera. Before building a scanner, set `MobileScannerPlatform.instance` to a fake, push detections through it, and assert on your own UI: the scanner's real logic (validator, modes, route pop, controller) runs. `flutter_test` reports `TargetPlatform.android`, so Android capabilities apply. Advance time with `pump(Duration)`: `pumpAndSettle` times out while the default sweep animation runs (`overlayConfig: const ScannerOverlayConfig.minimal()` has none). The default gallery picker is the `image_picker` plugin, which does not run in widget tests: pass `galleryImagePicker: (_) async => const ScannerImage.path('code.png')` and set the fake's `imageResult`; if a screen uses the built-in gallery button, give it an optional `galleryImagePicker` parameter so tests can inject one. Reset `MobileScannerController.resetPlatformSessionOwner` after each test.
+
+- **Image analysis that writes a temporary file** (`ScannerImage.bytes`, or `XFile.fromData`, on the Android/iOS/macOS code path tests run) does real I/O, and one `runAsync` plus one `pump` is not enough after the tap that starts it. Pump like this instead: `for (var i = 0; i < 10; i++) { await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20))); await tester.pump(); }`.
+- **Find the scanner's controls by their default labels** (from `ScannerLabels`): close button `find.byTooltip('Close scanner')`, filled gallery button `find.text('Upload from gallery')` (`GalleryButtonType.icon`: `find.byTooltip('Scan a barcode from an image')`), batch Done button `find.text('Done')`. A rejected capture shows `find.text('That barcode is not accepted here')` in the hint for a couple of seconds (only where `showScanHint` is true, so not in `AiBarcodeScanner.embedded` by default).
+- **Cancel a pushed scanner** with `await tester.tap(find.byTooltip('Close scanner'))` (the scanner must have `ScannerAction.close`, as `showAiBarcodeScanner` does). `tester.pageBack()` does not work: the close control is not a `BackButton`.
+
+```dart
+// test/fake_scanner_platform.dart
+import 'dart:async';
+
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:flutter/widgets.dart';
+
+class FakeScannerPlatform extends MobileScannerPlatform {
+  final _barcodes = StreamController<BarcodeCapture?>.broadcast();
+  BarcodeCapture? imageResult; // returned by analyzeImage (gallery button, analyzeScannerImage)
+
+  /// Simulates the camera seeing a barcode.
+  void emit(String value, {BarcodeFormat format = BarcodeFormat.qrCode}) =>
+      _barcodes.add(BarcodeCapture(barcodes: [Barcode(rawValue: value, displayValue: value, format: format)]));
+
+  @override Future<MobileScannerViewAttributes> start(StartOptions startOptions) async => MobileScannerViewAttributes(
+      cameraDirection: startOptions.cameraDirection, currentTorchMode: TorchState.off,
+      size: const Size(1280, 720), numberOfCameras: 1);
+  @override Future<BarcodeCapture?> analyzeImage(String path, {List<BarcodeFormat> formats = const []}) async =>
+      imageResult;
+  @override Stream<BarcodeCapture?> get barcodesStream => _barcodes.stream;
+  @override Widget buildCameraView() => const ColoredBox(color: Color(0xFF000000));
+  @override Future<Set<CameraLensType>> getSupportedLenses({CameraFacing? facing}) async => const {CameraLensType.normal};
+  @override Stream<TorchState> get torchStateStream => const Stream.empty();
+  @override Stream<double> get zoomScaleStateStream => const Stream.empty();
+  @override Future<void> stop() async {}
+  @override Future<void> pause() async {}
+  @override Future<void> dispose() async {}
+  @override Future<void> toggleTorch() async {}
+  @override Future<void> setZoomScale(double zoomScale) async {}
+  @override Future<void> resetZoomScale() async {}
+  @override Future<void> setFocusPoint(Offset position) async {}
+  @override Future<void> updateScanWindow(Rect? window) async {}
+}
+```
+
+```dart
+// test/scan_field_test.dart
+import 'package:ai_barcode_scanner/ai_barcode_scanner.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:my_app/scan_field.dart';
+
+import 'fake_scanner_platform.dart';
+
+void main() {
+  late FakeScannerPlatform platform;
+  setUp(() => MobileScannerPlatform.instance = platform = FakeScannerPlatform());
+  tearDown(MobileScannerController.resetPlatformSessionOwner);
+
+  Future<void> settle(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1)); // not pumpAndSettle: the sweep animation never ends
+  }
+
+  testWidgets('scanning fills the text field', (tester) async {
+    final text = TextEditingController();
+    addTearDown(text.dispose);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ScanField(controller: text))));
+    await tester.tap(find.byTooltip('Scan barcode'));
+    await settle(tester);
+    expect(find.byType(AiBarcodeScanner), findsOneWidget);
+
+    platform.emit('not a barcode'); // rejected by the validator: the scanner stays open
+    await settle(tester);
+    expect(find.byType(AiBarcodeScanner), findsOneWidget);
+
+    platform.emit('4006381333931', format: BarcodeFormat.ean13);
+    await settle(tester);
+    expect(find.byType(AiBarcodeScanner), findsNothing); // the route popped
+    expect(text.text, '4006381333931');
+  });
+}
+```
+
+## Pitfalls and troubleshooting
+
+- **Android build errors (CameraX, AGP, compileSdk):** raise to AGP 8.9.1+, compileSdk 36, minSdk 23, Kotlin Gradle Plugin 2.x. `cannot find symbol: class MobileScannerPlugin` after moving to 7.4.1 is a stale build: `flutter clean`. The "plugins that apply Kotlin Gradle Plugin (KGP): mobile_scanner" warning means an older mobile_scanner still resolves: `flutter pub upgrade mobile_scanner`, then `flutter clean`.
+- **Play Console "must support 16 KB memory page sizes":** the native code is mobile_scanner's (this package has none). Resolve mobile_scanner >= 7.4.0 (ML Kit barcode-scanning 17.3.0 is 16 KB aligned) and build with AGP 8.9.1+ and NDK r27+. The usual culprit is a stale lockfile or pub cache: `flutter clean`, delete `~/.pub-cache/hosted/pub.dev/mobile_scanner-*`, `flutter pub get`. 32-bit ABIs staying at 4 KB is expected.
+- **iOS build or pod errors:** check the deployment target is at least 12.0, or the version a CocoaPods error names (`platform :ios` in `ios/Podfile` if the project has one, otherwise Minimum Deployments in Xcode); new Flutter templates may have no Podfile. For CocoaPods conflicts run `flutter clean`, then `cd ios && rm Podfile.lock && pod install --repo-update`.
+- **Black preview, or the camera does not come back from the background:** keep `useAppLifecycleState: true`. `MobileScanner` stops its controller when it unmounts (when that controller's `autoStart` is true, the default), so a controller reused on a later screen needs `start()`; when a second scanner route pops, call `start()` on the first scanner's controller.
+- **The same code is not reported again on Android:** `DetectionSpeed.noDuplicates` (default) drops a repeat of the previous value until a different code is seen. To count identical items, use `scanMode: ScanMode.continuous` with `detectionSpeed: DetectionSpeed.normal`, throttled by `scanCooldown` (the cooldown only throttles continuous mode).
+- **A code inside the reticle does not scan:** check for `restrictDetectionToScanWindow: true` (Android needs the whole code inside the window and drops codes without corner points).
+- **Slow or wrong reads:** restrict `formats`; on Android `autoZoom: true` (and `invertImage: true` for white-on-black codes); on iOS `controller.useCloseRangeLens()`. `detectionTimeoutMs` only applies with `DetectionSpeed.normal`.
+- **Icons render as empty boxes:** the defaults are Material icons, so the app's pubspec needs `uses-material-design: true`; if you pass `CupertinoIcons`, the app must depend on `cupertino_icons`.
+- **No close button:** it renders in the default app bar only when `enabledActionButtons` contains `ScannerAction.close`. `showAiBarcodeScanner` and `showAiBarcodeScannerBatch` include it by default; a plain `AiBarcodeScanner` does not. A custom `appBarBuilder` replaces the app bar and its close button; provide your own way back.
+- **Assertion "Camera options ... are ignored when `controller` is supplied":** move those options onto `AiBarcodeScannerController`.
+- **`flutter analyze` reports `imagePicker` / `onImagePick` as deprecated** (infos are fatal by default): migrate to `galleryImagePicker` / `onGalleryImagePick`.
+- **Web: "Could not load the zxing-wasm barcode decoder" or "zxing-wasm could not load its WebAssembly binary":** offline, or the CSP blocks jsDelivr; allow the hosts above, self-host the script (`webBarcodeLibraryScriptUrl`, or `AiBarcodeScannerController.setWebImageDecoderScriptUrl` without a scanner), or use `galleryImageAnalyzer`. **"Could not read the picked image":** allow `blob:` in `connect-src`.
+- **Web: no gallery button:** it appears only after the camera starts, so not over the error screen (no webcam, permission denied). For camera-less flows call `analyzeScannerImage` from your own button; `controller.raw.analyzeImage` always throws `UnsupportedError` on the web.
+- **"That barcode is not accepted here" or "No barcode found in that image" replaces the scan hint:** that is `ScannerLabels.invalidBarcode` / `noBarcodeFoundInImage` reporting a rejected scan or an empty image. Translate them with your other labels; set one to `''` to turn just that message off, or `showScanHint: false` to hide them with the rest of the hint copy.
+- **"No MaterialLocalizations found" in a `material_ui` app:** upgrade to 8.1.0+; no bridge needed.
+
+## Deprecated and renamed
+
+| Old | Status | Use instead |
+| --- | --- | --- |
+| `imagePicker: (context) async => path` | Deprecated 8.1.0, removal planned for 9.0.0 | `galleryImagePicker: (context) async => path == null ? null : ScannerImage.path(path)` (or `.bytes` / `.xFile`) |
+| `onImagePick: (String? path) {...}` | Deprecated 8.1.0 | `onGalleryImagePick: (ScannerImage? image) {...}`; contents via `image.readAsBytes()` |
+| `controller.raw.analyzeImage(path)` gated by `ScannerPlatformSupport.current.analyzeImage` | Changed 8.1.0 (flag is `true` on the web, raw call throws there) | `controller.analyzeImage(path)` or `controller.analyzeScannerImage(image)` |
+| `controller: MobileScannerController(...)` | Removed 8.0.0 | widget parameters, `AiBarcodeScannerController(...)`, or `.fromMobileScanner(existing)` |
+| `galleryButtonText: '...'` | Removed 8.0.0 | `labels: ScannerLabels(galleryButton: '...')` |
+| `setPortraitOrientation: true` | Removed 8.0.0 | `preferredOrientations: const [DeviceOrientation.portraitUp]` (`package:flutter/services.dart`) |
+| `onCustomImagePicker: (validator, onDetect, controller) async {...}` | Removed 8.0.0 | `galleryImagePicker` (plus `galleryImageAnalyzer` to decode yourself) |
+| `ScannerOverlayConfig(backgroundBlurColor: c)` | Renamed 8.0.0 | `ScannerOverlayConfig(backgroundColor: c)` |
+| `overlayBuilder: (context, constraints, controller, isSuccess)` | Changed 8.0.0 | `(context, constraints, controller, scanWindow, isSuccess)` |
+| `ErrorBuilder` (default error widget) | Renamed 8.0.0 | `ScannerErrorView` |
+| Scan window always restricted detection | Changed 8.0.0 | opt in with `restrictDetectionToScanWindow: true` |
+| `child:` replaced the controls; `GalleryButtonType.none` also hid torch and flip | Changed 8.0.0 | `child` is added over them; hide controls with `enabledActionButtons: const {}` |
+| `CupertinoIcons.*` default icons; portrait locked by default | Changed 8.0.0 | `Icons.*` defaults; orientation untouched unless `preferredOrientations` is set |
+| 6.x widget styling (`borderColor`, `borderWidth`, `overlayColor`, `borderRadius`, `borderLength`, `cutOutSize`) | Removed 7.0 | `overlayConfig: ScannerOverlayConfig(...)`, `scanWindowConfig: ScanWindowConfig(...)` |
+| `hideGalleryButton` / `hideGalleryIcon`; built-in `DraggableSheet` | Removed 7.0 | `galleryButtonType: GalleryButtonType.none` / `.icon` / `.filled`; `bottomSheetBuilder` |
+| `BarcodeFormat.itf`, `BarcodeFormat.codebar`, `Barcode.rawBytes` (mobile_scanner) | Deprecated | `BarcodeFormat.itf14`, `BarcodeFormat.codabar`, `Barcode.rawDecodedBytes` |
+
+## Links
+
+- [pub.dev package](https://pub.dev/packages/ai_barcode_scanner)
+- [API reference](https://pub.dev/documentation/ai_barcode_scanner/latest/)
+- [README](https://github.com/itsarvinddev/barcode_scanner/blob/master/README.md): full guide, platform matrix, web and material_ui notes
+- [Migration guide](https://github.com/itsarvinddev/barcode_scanner/blob/master/MIGRATION_GUIDE.md): 6.x to 7.x, 7.x to 8.0, 8.0 to 8.1
+- [Changelog](https://github.com/itsarvinddev/barcode_scanner/blob/master/CHANGELOG.md)
+- [Example app](https://github.com/itsarvinddev/barcode_scanner/tree/master/example/lib)
+- [This file](https://raw.githubusercontent.com/itsarvinddev/barcode_scanner/master/llms.txt)
+- [mobile_scanner](https://pub.dev/packages/mobile_scanner): the underlying camera plugin and data model
